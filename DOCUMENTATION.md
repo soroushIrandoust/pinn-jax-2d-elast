@@ -32,9 +32,9 @@ Purpose: top-level training entry point. It builds the default configuration, tr
 - Lines 25-28: Import configuration dataclasses, the training routine, the evaluation helpers, and the plotting functions.
 - Lines 31-32: Start `main()` and compute the output directory as `<project>/results`.
 - Lines 34-70: Construct the default `Config` object.
-  - Lines 35-43: Build `ProblemConfig` with `L=10000 mm`, `H=1000 mm`, `E=20000 MPa`, `nu=0.3`, `sigma0=2 MPa`, `hole_radius=100 mm`, and `plane_stress`.
-  - Lines 44-49: Build `NetworkConfig` with four 128-unit hidden layers, `tanh`, hard BCs enabled, and `n_fourier=8`.
-  - Lines 50-69: Build `TrainingConfig` with the recovered stable regime: 4096 interior points, 512 boundary/hole/midline points where applicable, 150000 Adam epochs, warmup-plus-cosine schedule, effectively fixed sampling via `resample_every=200000`, and the current loss weights.
+  - Lines 35-43: Build `ProblemConfig` with `L=10000 mm`, `H=1000 mm`, `E=2000 MPa`, `nu=0.3`, `sigma0=2 MPa`, `hole_radius=200 mm`, and `plane_stress`.
+  - Lines 44-49: Build `NetworkConfig` with four 128-unit hidden layers, `tanh`, hard BCs enabled, `n_fourier=8`, and `n_polar=6`.
+  - Lines 50-69: Build `TrainingConfig` with the current stable regime: 6144 interior points, 512 boundary/midline points, 1024 hole-boundary points, 300000 Adam epochs, warmup-plus-cosine schedule, `resample_every=2000` to prevent fixed-batch collapse, `near_hole_fraction=0.30`, `near_hole_outer_mult=3.0`, and the current loss weights (`w_pde=10.0`, `w_bc_disp=100.0`, `w_bc_traction=60.0`, `w_bc_tb=50.0`, `w_bc_hole=3.0`, `w_bc_mid=30.0`).
 - Line 72: Print the startup banner via `_print_banner(cfg)`.
 - Lines 74-77: Training block header comment and actual call to `train(cfg)` returning trained parameters, the model object, and the saved history arrays.
 - Lines 79-85: Evaluation block. It evaluates the trained PINN on a full grid, a near-hole zoom grid, and computes a compact metric summary.
@@ -106,13 +106,13 @@ Purpose: define all physical, network, and training hyperparameters as dataclass
   - Lines 31-34: `hole_xi_c` property fixes the normalized hole center in `x` at `0.5`.
   - Lines 36-39: `hole_eta_c` property fixes the normalized hole center in `y` at `0.5 * H / L`.
   - Lines 41-44: `hole_rc` property computes the normalized hole radius.
-- Lines 47-54: `NetworkConfig` dataclass.
-  - Lines 51-54: Default architecture: four 128-unit layers, `tanh`, hard BCs on, eight Fourier bands.
-- Lines 57-85: `TrainingConfig` dataclass.
-  - Lines 61-65: Default sample counts.
-  - Lines 67-73: Optimization schedule parameters and seed.
-  - Lines 75-81: Loss weights for PDE, left BC, right traction, top/bottom traction-free, hole traction-free, and midline symmetry.
-  - Lines 83-85: Logging cadence and save directory.
+- Lines 47-55: `NetworkConfig` dataclass.
+  - Default architecture: four 128-unit layers, `tanh`, hard BCs on, `n_fourier=8` Fourier bands, `n_polar=6` angular harmonics for the hole-centred polar embedding.
+- Lines 58-90: `TrainingConfig` dataclass.
+  - Default sample counts: `n_interior=6144`, `n_boundary=512`, `n_hole=1024`, `n_midline=512`, plus `near_hole_fraction=0.30` and `near_hole_outer_mult=3.0` controlling the near-hole annulus enrichment.
+  - Optimization schedule: `epochs_adam=300000`, `lr_init=1e-3`, `lr_final=1e-5`, `warmup_steps=1000`, `resample_every=2000`.
+  - Loss weights: `w_pde=10.0`, `w_bc_disp=100.0`, `w_bc_traction=60.0`, `w_bc_tb=50.0`, `w_bc_hole=3.0`, `w_bc_mid=30.0`.
+  - Logging cadence and save directory.
 - Lines 88-92: `Config` wrapper dataclass that nests `problem`, `network`, and `training` using default factories.
 
 ## 6. src/evaluate.py
@@ -131,8 +131,8 @@ Purpose: evaluate a trained network on regular grids in physical units and compu
   - Lines 55-58: Compute and store the hole mask, hole center, and hole radius.
   - Lines 60-61: Replace values inside the hole with `NaN` so downstream plotting ignores them.
   - Line 63: Return the assembled results dictionary.
-- Lines 66-72: `evaluate_on_grid(...)` creates a standard full-domain grid of `201 × 81` points and forwards to `_evaluate_grid`.
-- Lines 75-87: `evaluate_near_hole(...)` builds a clipped zoom window around the hole, defaulting to `2.5` radii in each direction, then forwards to `_evaluate_grid`.
+- Lines 66-72: `evaluate_on_grid(...)` creates a standard full-domain grid of `401 × 161` points and forwards to `_evaluate_grid`.
+- Lines 75-87: `evaluate_near_hole(...)` builds a clipped zoom window around the hole, defaulting to `2.5` radii in each direction with a `401 × 401` grid, then forwards to `_evaluate_grid`.
 - Lines 90-98: `compute_summary_metrics(res)` returns max/min summary values used in `main.py` and `postprocess.py`.
 
 ## 7. src/network.py
@@ -159,24 +159,16 @@ Purpose: define the neural architectures used by the PINN.
 
 ## 8. src/sampler.py
 
-Purpose: generate interior, boundary, hole, and symmetry-line collocation points.
+Purpose: generate interior, boundary, hole, and symmetry-line collocation points using random sampling to avoid aliasing with Fourier features.
 
-- Lines 1-6: Module docstring describing the normalized coordinate system and the hole location.
-- Lines 8-10: Import `numpy`, `jax`, and `jax.numpy`.
-- Line 12: Import the problem and training configs.
-- Lines 15-40: `sample_interior(...)`.
-  - Lines 21-23: Read the hole center and radius in normalized coordinates.
-  - Lines 25-28: Draw twice as many raw points as needed.
-  - Lines 30-32: Reject points that fall inside the hole.
-  - Lines 34-38: Fail loudly if oversampling was still insufficient.
-  - Line 40: Return the accepted points as a JAX array.
-- Lines 43-59: `sample_hole_boundary(...)`.
-  - Lines 49-51: Read hole geometry.
-  - Lines 53-55: Draw random angles and compute unit-circle trigonometric values.
-  - Lines 57-59: Convert the angles into point coordinates and outward normals `[xi, eta, nx, ny]`.
-- Lines 62-66: `sample_midline(...)` samples random `xi` and fixes `eta` to the hole center height, which is the normalized midline.
-- Lines 69-94: `sample_boundaries(...)` samples each of the four outer rectangular boundaries independently.
-- Lines 97-106: `get_batch(...)` orchestrates the full batch: interior, four outer edges, hole boundary, and midline samples.
+- Lines 1-12: Module docstring and imports (`numpy`, `jax`, `jax.numpy`, problem/training configs).
+- `_sample_bulk_interior(cfg_p, n, key)`: Draws `4n` random uniform candidates and rejects those inside the hole. Raises a `RuntimeError` if fewer than `n` valid points survive.
+- `_sample_near_hole_annulus(cfg_p, n, key, outer_radius_mult=3.0)`: Samples `n` points uniformly by area in the annulus `R < r < outer_radius_mult * R` using the inverse-CDF trick `r = sqrt(U(r_min², r_max²))`. Results are clipped to the domain.
+- `sample_interior(cfg_p, n, key, cfg_t)`: Splits `n` into `n_near = round(n * cfg_t.near_hole_fraction)` and `n_bulk`, draws each sub-set from the appropriate sampler, and concatenates them.
+- `sample_hole_boundary(cfg_p, n)`: Returns `n` deterministic equi-spaced points on the hole circumference (angles via `jnp.linspace`) together with outward unit normals `[xi, eta, nx, ny]`.
+- `sample_midline(cfg_p, n, key)`: Samples random `xi` values with `eta` fixed at the normalised midline height.
+- `sample_boundaries(cfg_p, n, key)`: Samples each of the four outer rectangle edges independently.
+- `get_batch(cfg_p, cfg_t, key)`: Orchestrates the full batch by calling all samplers and returning a named tuple of interior, boundary, hole, and midline point arrays.
 
 ## 9. src/physics.py
 
@@ -318,10 +310,12 @@ This document describes the current hole-aware version of the codebase, not the 
 
 The most important behavior choices in the current implementation are:
 
-- hard enforcement of both `u = 0` and `v = 0` on the left edge
+- hard enforcement of both `u = 0` and `v = 0` on the left edge via hard-BC ansatz
 - explicit hole traction-free loss
 - explicit midline symmetry loss `v(x, H/2) = 0`
-- fixed default hole radius of `100 mm`
+- fixed default hole radius of `200 mm`
 - right-edge traction of `2 MPa`
-- `E = 20_000 MPa`
-- stable long-run training regime with `epochs_adam = 150000` and `resample_every = 200000`
+- `E = 2 000 MPa`
+- FourierMLP with `n_fourier=8` global bands and `n_polar=6` hole-centred polar harmonics
+- stable long-run training regime with `epochs_adam = 300000` and `resample_every = 2000`
+- near-hole collocation enrichment: 30% of interior points sampled in a 3R annulus around the hole
