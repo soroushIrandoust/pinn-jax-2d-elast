@@ -68,7 +68,6 @@ archive/
 # ------------------------------
 # Local-only files (do not publish)
 # ------------------------------
-smoke_test.py
 _patch_docs.py
 GITHUB_WORKFLOW.md
 github_workflow.md
