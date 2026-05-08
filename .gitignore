@@ -65,6 +65,12 @@ archive/
 *.gz
 *.7z
 
-
+# ------------------------------
+# Local-only files (do not publish)
+# ------------------------------
+smoke_test.py
+_patch_docs.py
 GITHUB_WORKFLOW.md
+github_workflow.md
 DOCUMENTATION.md
+documentation.md

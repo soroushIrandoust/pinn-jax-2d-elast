@@ -18,7 +18,6 @@ The current problem setup is a plate of size `10000 mm x 1000 mm` with a centere
 - `main.py`: main training entry point
 - `postprocess.py`: regenerate plots from saved checkpoints
 - `generate_report.py`: build a PDF report from results
-- `smoke_test.py`: short end-to-end sanity check
 - `requirements.txt`: Python dependencies
 - `src/config.py`: problem, network, and training dataclasses
 - `src/train.py`: training loop
@@ -27,7 +26,6 @@ The current problem setup is a plate of size `10000 mm x 1000 mm` with a centere
 - `src/physics.py`: elasticity equations and residual/stress helpers
 - `src/sampler.py`: collocation-point sampling
 - `src/visualize.py`: plotting utilities
-- `DOCUMENTATION.md`: more detailed walkthrough of the codebase
 
 ## Installation
 
@@ -64,12 +62,6 @@ python postprocess.py
 python postprocess.py --checkpoint final
 ```
 
-Run the smoke test:
-
-```bash
-python smoke_test.py
-```
-
 Generate the PDF report from the default results directory:
 
 ```bash
@@ -96,4 +88,3 @@ The default training run writes outputs to `results/`, including:
 
 - The current training configuration is defined in `src/config.py`.
 - The report text is generated dynamically from configuration defaults.
-- `DOCUMENTATION.md` contains a more detailed file-by-file technical description.
