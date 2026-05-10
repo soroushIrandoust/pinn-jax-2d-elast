@@ -34,6 +34,7 @@ from visualize import (
     plot_hole_zoom,
     plot_loss_history,
     plot_principal_fields,
+    plot_principal_vectors,
     plot_deformed_fields,
     plot_sampling_points,
 )
@@ -89,7 +90,7 @@ def postprocess(results_dir: str, checkpoint: str = "best") -> None:
     results_zoom = evaluate_near_hole(params, model, cfg.problem, cfg.network)
     metrics = compute_summary_metrics(results)
     print(f"  max sigma_xx = {metrics['sxx_max']:.4e} {cfg.problem.stress_unit}")
-    print(f"  max |tau_xy| = {metrics['txy_abs_max']:.4e} {cfg.problem.stress_unit}")
+    print(f"  max |σ_xy| = {metrics['sxy_abs_max']:.4e} {cfg.problem.stress_unit}")
 
     # ------------------------------------------------------------------
     # Visualise
@@ -101,27 +102,36 @@ def postprocess(results_dir: str, checkpoint: str = "best") -> None:
         import numpy as np
         raw = np.load(loss_path)
         history = {k: raw[k].tolist() for k in raw.files}
-        plot_loss_history(history, results_dir)
+        plot_loss_history(history, results_dir, plot_cfg=cfg.plotting)
     else:
         print("  (loss_history.npz not found — skipping loss plot)")
 
     plot_fields(results, results_dir,
                 length_unit=cfg.problem.length_unit,
-                stress_unit=cfg.problem.stress_unit)
+                                stress_unit=cfg.problem.stress_unit,
+                                plot_cfg=cfg.plotting)
     plot_principal_fields(results, results_dir,
                           length_unit=cfg.problem.length_unit,
-                          stress_unit=cfg.problem.stress_unit)
+                                                    stress_unit=cfg.problem.stress_unit,
+                                                    plot_cfg=cfg.plotting)
+    plot_principal_vectors(results, results_dir,
+                           length_unit=cfg.problem.length_unit,
+                                                     stress_unit=cfg.problem.stress_unit,
+                                                     plot_cfg=cfg.plotting)
     plot_deformed_fields(results, results_dir,
                          deformation_scale=cfg.plotting.deformation_scale,
                          length_unit=cfg.problem.length_unit,
-                         stress_unit=cfg.problem.stress_unit)
+                                                 stress_unit=cfg.problem.stress_unit,
+                                                 plot_cfg=cfg.plotting)
     plot_hole_zoom(results_zoom, results_dir,
                    length_unit=cfg.problem.length_unit,
-                   stress_unit=cfg.problem.stress_unit)
+                                     stress_unit=cfg.problem.stress_unit,
+                                     plot_cfg=cfg.plotting)
 
     batch = get_batch(cfg.problem, cfg.training, jax.random.PRNGKey(cfg.training.seed))
     plot_sampling_points(batch, cfg.problem, results_dir,
-                         length_unit=cfg.problem.length_unit)
+                         length_unit=cfg.problem.length_unit,
+                         plot_cfg=cfg.plotting)
 
     print(f"\n✓  All results saved to  '{results_dir}/'")
 

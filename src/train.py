@@ -1,4 +1,4 @@
-"""Training loop with Adam optimiser and cosine LR schedule."""
+"""Training loop with Adam optimiser and optional L-BFGS refinement."""
 
 import os
 import time
@@ -65,20 +65,79 @@ def _format_gpu_specs() -> list[str]:
 
 
 def _build_schedule(cfg_t):
-    """Warm-up then cosine decay."""
+    """Build learning-rate schedule from training config.
+
+    Supported modes:
+            - warmup_cosine: linear warm-up to lr_init, then cosine decay to lr_final,
+                then hold lr_final if training continues
+      - ramp_hold_cosine: linear ramp from lr_start to lr_init, hold, then cosine
+    """
+    mode = getattr(cfg_t, "lr_schedule", "warmup_cosine")
+
+    if mode == "ramp_hold_cosine":
+        ramp_steps = max(int(getattr(cfg_t, "lr_ramp_steps", 100000)), 1)
+        hold_steps = max(int(getattr(cfg_t, "lr_hold_steps", 20000)), 0)
+        lr_start = float(getattr(cfg_t, "lr_start", cfg_t.lr_init))
+
+        if cfg_t.epochs_adam <= ramp_steps:
+            return optax.linear_schedule(
+                init_value=lr_start,
+                end_value=cfg_t.lr_init,
+                transition_steps=ramp_steps,
+            )
+
+        if cfg_t.epochs_adam <= ramp_steps + hold_steps:
+            ramp = optax.linear_schedule(
+                init_value=lr_start,
+                end_value=cfg_t.lr_init,
+                transition_steps=ramp_steps,
+            )
+            hold = optax.constant_schedule(cfg_t.lr_init)
+            return optax.join_schedules(
+                schedules=[ramp, hold],
+                boundaries=[ramp_steps],
+            )
+
+        ramp = optax.linear_schedule(
+            init_value=lr_start,
+            end_value=cfg_t.lr_init,
+            transition_steps=ramp_steps,
+        )
+        hold = optax.constant_schedule(cfg_t.lr_init)
+        decay = optax.cosine_decay_schedule(
+            init_value=cfg_t.lr_init,
+            decay_steps=max(cfg_t.epochs_adam - ramp_steps - hold_steps, 1),
+            alpha=cfg_t.lr_final / cfg_t.lr_init,
+        )
+        return optax.join_schedules(
+            schedules=[ramp, hold, decay],
+            boundaries=[ramp_steps, ramp_steps + hold_steps],
+        )
+
     warmup = optax.linear_schedule(
         init_value=0.0,
         end_value=cfg_t.lr_init,
         transition_steps=cfg_t.warmup_steps,
     )
+
+    decay_end = min(int(getattr(cfg_t, "lr_decay_steps", cfg_t.epochs_adam)), cfg_t.epochs_adam)
+    decay_steps = max(decay_end - cfg_t.warmup_steps, 1)
     decay = optax.cosine_decay_schedule(
         init_value=cfg_t.lr_init,
-        decay_steps=max(cfg_t.epochs_adam - cfg_t.warmup_steps, 1),
+        decay_steps=decay_steps,
         alpha=cfg_t.lr_final / cfg_t.lr_init,
     )
+
+    if decay_end <= cfg_t.warmup_steps or decay_end >= cfg_t.epochs_adam:
+        return optax.join_schedules(
+            schedules=[warmup, decay],
+            boundaries=[cfg_t.warmup_steps],
+        )
+
+    hold_final = optax.constant_schedule(cfg_t.lr_final)
     return optax.join_schedules(
-        schedules=[warmup, decay],
-        boundaries=[cfg_t.warmup_steps],
+        schedules=[warmup, decay, hold_final],
+        boundaries=[cfg_t.warmup_steps, decay_end],
     )
 
 
@@ -109,18 +168,24 @@ def train(cfg: Config):
     optimizer = optax.adam(learning_rate=schedule)
     opt_state = optimizer.init(params)
 
+    def loss_and_info(p, batch):
+        return total_loss(
+            p, model, batch,
+            cfg.problem, cfg.training, use_hard_bc,
+        )
+
+    def loss_only(p, batch):
+        return loss_and_info(p, batch)[0]
+
     # -----------------------------------------------------------------------
     # JIT-compiled single training step
     # -----------------------------------------------------------------------
     @jax.jit
     def step(params, opt_state, batch):
-        def loss_fn(p):
-            return total_loss(
-                p, model, batch,
-                cfg.problem, cfg.training, use_hard_bc,
-            )
-
-        (loss_val, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
+        (loss_val, info), grads = jax.value_and_grad(
+            lambda p: loss_and_info(p, batch),
+            has_aux=True,
+        )(params)
         updates, new_opt_state = optimizer.update(grads, opt_state)
         new_params = optax.apply_updates(params, updates)
         return new_params, new_opt_state, loss_val, info

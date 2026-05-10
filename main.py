@@ -20,6 +20,7 @@ Usage
 import os
 import sys
 import io
+import re
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
@@ -34,6 +35,7 @@ from visualize import (
     plot_hole_zoom,
     plot_loss_history,
     plot_principal_fields,
+    plot_principal_vectors,
     plot_deformed_fields,
     plot_sampling_points,
 )
@@ -53,6 +55,22 @@ class _TeeStream:
     def flush(self):
         self._stream.flush()
         self._buffer.flush()
+
+
+def _clean_run_log(text: str) -> str:
+    """Remove tqdm progress-bar redraw artifacts from captured output.
+
+    Keeps explicit training summary lines (printed via tqdm.write) and normal
+    print output, while dropping dynamic progress-bar updates.
+    """
+    # tqdm updates are written with carriage returns; normalize first.
+    normalized = text.replace("\r", "\n")
+    lines = normalized.splitlines()
+
+    # Match typical tqdm bar fragments like " 76%|###...".
+    pbar_re = re.compile(r"\s*\d{1,3}%\|.*")
+    cleaned = [ln for ln in lines if ln and not pbar_re.match(ln)]
+    return "\n".join(cleaned) + "\n"
 
 
 def main():
@@ -91,24 +109,33 @@ def main():
         print(f"    max |v|        :  {metrics['v_max']:.4e} {cfg.problem.length_unit}")
         print(f"    max sigma_xx   :  {metrics['sxx_max']:.4e} {cfg.problem.stress_unit}")
         print(f"    min sigma_yy   :  {metrics['syy_min']:.4e} {cfg.problem.stress_unit}")
-        print(f"    max |tau_xy|   :  {metrics['txy_abs_max']:.4e} {cfg.problem.stress_unit}")
+        print(f"    max |σ_xy|     :  {metrics['sxy_abs_max']:.4e} {cfg.problem.stress_unit}")
 
         # -------------------------------------------------------------------
         # Visualise
         # -------------------------------------------------------------------
         print("\nSaving plots …")
-        plot_loss_history(history, cfg.training.save_dir)
+        plot_loss_history(history, cfg.training.save_dir, plot_cfg=cfg.plotting)
         plot_fields(
             results,
             cfg.training.save_dir,
             length_unit=cfg.problem.length_unit,
             stress_unit=cfg.problem.stress_unit,
+            plot_cfg=cfg.plotting,
         )
         plot_principal_fields(
             results,
             cfg.training.save_dir,
             length_unit=cfg.problem.length_unit,
             stress_unit=cfg.problem.stress_unit,
+            plot_cfg=cfg.plotting,
+        )
+        plot_principal_vectors(
+            results,
+            cfg.training.save_dir,
+            length_unit=cfg.problem.length_unit,
+            stress_unit=cfg.problem.stress_unit,
+            plot_cfg=cfg.plotting,
         )
         plot_deformed_fields(
             results,
@@ -116,24 +143,28 @@ def main():
             deformation_scale=cfg.plotting.deformation_scale,
             length_unit=cfg.problem.length_unit,
             stress_unit=cfg.problem.stress_unit,
+            plot_cfg=cfg.plotting,
         )
         plot_hole_zoom(
             results_zoom,
             cfg.training.save_dir,
             length_unit=cfg.problem.length_unit,
             stress_unit=cfg.problem.stress_unit,
+            plot_cfg=cfg.plotting,
         )
         _batch = get_batch(cfg.problem, cfg.training,
                            jax.random.PRNGKey(cfg.training.seed))
         plot_sampling_points(_batch, cfg.problem, cfg.training.save_dir,
-                             length_unit=cfg.problem.length_unit)
+                             length_unit=cfg.problem.length_unit,
+                             plot_cfg=cfg.plotting)
 
         print(f"\n✓  All results saved to  '{cfg.training.save_dir}/'")
     finally:
         sys.stdout = orig_stdout
         sys.stderr = orig_stderr
+        cleaned_log = _clean_run_log(log_buffer.getvalue())
         with open(log_path, "w", encoding="utf-8") as fh:
-            fh.write(log_buffer.getvalue())
+            fh.write(cleaned_log)
         print(f"Run log saved to: {log_path}")
 
 
@@ -154,8 +185,10 @@ def _print_banner(cfg: Config):
         f"  Network  : FourierMLP{list(n.hidden_dims)}, act={n.activation}, "
         f"hard_bc={n.use_hard_bc}, n_fourier={n.n_fourier}"
     )
-    print(f"  Training : {t.epochs_adam} epochs,  "
-          f"lr {t.lr_init:.0e}→{t.lr_final:.0e}")
+    print(
+        f"  Training : Adam {t.epochs_adam} steps,  "
+        f"lr {t.lr_init:.0e}→{t.lr_final:.0e}  (warmup {t.warmup_steps} steps)"
+    )
     print(sep)
 
 

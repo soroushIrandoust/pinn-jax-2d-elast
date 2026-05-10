@@ -161,8 +161,8 @@ def bc_right_traction(params, model, pts_right, C11, C12, C33, use_hard_bc):
         lambda xy: _stress_at(params, model, xy, C11, C12, C33, use_hard_bc)
     )(pts_right)
     loss_sxx = jnp.mean((stresses[:, 0] - 1.0) ** 2)
-    loss_txy = jnp.mean(stresses[:, 2] ** 2)
-    return loss_sxx + loss_txy
+    loss_sxy = jnp.mean(stresses[:, 2] ** 2)
+    return loss_sxx + loss_sxy
 
 
 def bc_traction_free(params, model, pts, C11, C12, C33, use_hard_bc):

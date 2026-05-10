@@ -83,14 +83,12 @@ def _sample_near_hole_annulus(cfg_p: ProblemConfig, n: int, key: jax.Array,
 # Public sampling functions
 # ---------------------------------------------------------------------------
 
-def sample_interior(cfg_p: ProblemConfig, n: int, key: jax.Array,
-                    cfg_t: TrainingConfig) -> jnp.ndarray:
+def sample_interior(cfg_p: ProblemConfig, n: int, key: jax.Array, cfg_t: TrainingConfig) -> jnp.ndarray:
     """Sample *n* interior collocation points with near-hole enrichment.
 
     A configurable fraction of points are drawn from the near-hole annulus
-    R < r < kR; the
-    remaining points are drawn uniformly from the bulk domain (excluding the
-    hole circle).  All points share the same PDE loss weight.
+    R < r < kR; the remaining points are drawn uniformly from the bulk domain
+    (excluding the hole circle).  All points share the same PDE loss weight.
     Shape: (n, 2).
     """
     near_frac = float(np.clip(cfg_t.near_hole_fraction, 0.0, 0.95))
@@ -114,9 +112,7 @@ def sample_hole_boundary(cfg_p: ProblemConfig, n: int, key: jax.Array) -> jnp.nd
     eta_c = cfg_p.hole_eta_c
     r_c   = cfg_p.hole_rc
 
-    # Deterministic equal-angle sampling gives uniform geometric coverage
-    # and keeps geometry points consistent across training calls.
-    theta = jnp.linspace(0.0, 2.0 * jnp.pi, n, endpoint=False)
+    theta = jax.random.uniform(key, (n,), minval=0.0, maxval=2.0 * jnp.pi)
     cos_t = jnp.cos(theta)
     sin_t = jnp.sin(theta)
 

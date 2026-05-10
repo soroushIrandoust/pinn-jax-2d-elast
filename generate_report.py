@@ -270,7 +270,7 @@ def _loss_page(pdf: PdfPages, npz_path: str, fig_num: int):
         ax2.semilogy(epochs, data[key], lw=0.65, label=key, color=colors[ci % 10])
     ax2.set_xlabel("Epoch")
     ax2.set_title("Loss Components")
-    ax2.legend(loc="upper right", framealpha=0.7)
+    ax2.legend(loc="right", framealpha=0.7)
     ax2.grid(True, which="both", ls=":", lw=0.4)
 
     ax_cap = fig.add_axes([_LM, _BM + _CH * 0.28, _CW, _CH * 0.07])
@@ -317,6 +317,7 @@ def build_report(results_dir: str):
 
     with PdfPages(out_path) as pdf:
         logical_page = 1
+        handled_png_names = set()
         fig = plt.figure(figsize=(_PAGE_W, _PAGE_H))
         ax = fig.add_axes([_LM, _BM, _CW, _CH])
         ax.set_xlim(0, 1)
@@ -448,6 +449,8 @@ def build_report(results_dir: str):
                 nf(),
             )
         ], logical_page)
+        if os.path.exists(os.path.join(results_dir, "sampling_points.png")):
+            handled_png_names.add("sampling_points.png")
 
         fig = _text_page(pdf, textwrap.dedent(
             """
@@ -475,23 +478,63 @@ def build_report(results_dir: str):
         if fig is not None:
             _save_page(pdf, fig, logical_page)
             logical_page += 1
+            handled_png_names.add("loss_history.png")
 
-        figure_items = [
-            (img.format("u"), "x-displacement u (mm).", nf()),
-            (img.format("v"), "y-displacement v (mm).", nf()),
-            (img.format("sxx"), "sigma_xx (MPa).", nf()),
-            (img.format("syy"), "sigma_yy (MPa).", nf()),
-            (img.format("txy"), "tau_xy (MPa).", nf()),
-            (zimg.format("sxx"), "sigma_xx near hole (MPa) - near-hole detail.", nf()),
-            (zimg.format("syy"), "sigma_yy near hole (MPa) - near-hole detail.", nf()),
-            (zimg.format("txy"), "tau_xy near hole (MPa) - near-hole detail.", nf()),
-            (os.path.join(results_dir, "deformed_u.png"), "Deformed x-displacement field.", nf()),
-            (os.path.join(results_dir, "deformed_v.png"), "Deformed y-displacement field.", nf()),
-            (os.path.join(results_dir, "deformed_umag.png"), "Deformed displacement-magnitude field.", nf()),
-            (os.path.join(results_dir, "deformed_sxx.png"), "Deformed sigma_xx field.", nf()),
-            (os.path.join(results_dir, "deformed_syy.png"), "Deformed sigma_yy field.", nf()),
-            (os.path.join(results_dir, "deformed_sxy.png"), "Deformed tau_xy field.", nf()),
+        def _caption_from_stem(stem: str) -> str:
+            pretty = stem.replace("_", " ")
+            pretty = pretty.replace("sxx", "σ_xx")
+            pretty = pretty.replace("syy", "σ_yy")
+            pretty = pretty.replace("sxy", "σ_xy")
+            pretty = pretty.replace("s1", "σ1")
+            pretty = pretty.replace("s2", "σ2")
+            pretty = pretty.replace("e1", "ε1")
+            pretty = pretty.replace("e2", "ε2")
+            pretty = pretty.replace("exx", "ε_xx")
+            pretty = pretty.replace("eyy", "ε_yy")
+            pretty = pretty.replace("exy", "ε_xy")
+            return pretty + "."
+
+        preferred_stems = [
+            "undeformed_u", "undeformed_v", "undeformed_umag",
+            "undeformed_sxx", "undeformed_syy", "undeformed_sxy",
+            "undeformed_exx", "undeformed_eyy", "undeformed_exy",
+            "undeformed_s1", "undeformed_s2", "undeformed_e1", "undeformed_e2",
+            "undeformed_zoom_sxx", "undeformed_zoom_syy", "undeformed_zoom_sxy",
+            "undeformed_zoom_s1", "undeformed_zoom_s2",
+            "undeformed_zoom_exx", "undeformed_zoom_eyy", "undeformed_zoom_exy",
+            "undeformed_zoom_e1", "undeformed_zoom_e2",
+            "deformed_u", "deformed_v", "deformed_umag",
+            "deformed_sxx", "deformed_syy", "deformed_sxy",
+            "deformed_s1", "deformed_s2",
+            "deformed_exx", "deformed_eyy", "deformed_exy",
+            "deformed_e1", "deformed_e2",
+            "undeformed_vector_s1", "undeformed_vector_s2", "undeformed_vector_e1", "undeformed_vector_e2",
         ]
+
+        figure_items = []
+        used = set()
+
+        for stem in preferred_stems:
+            path = os.path.join(results_dir, f"{stem}.png")
+            if os.path.exists(path):
+                figure_items.append((path, _caption_from_stem(stem), nf()))
+                used.add(os.path.abspath(path))
+
+        # Include every remaining PNG not already inserted or handled as a
+        # dedicated page elsewhere.
+        for fname in sorted(os.listdir(results_dir)):
+            if not fname.lower().endswith(".png"):
+                continue
+            if fname in handled_png_names:
+                continue
+            path = os.path.join(results_dir, fname)
+            apath = os.path.abspath(path)
+            if apath in used:
+                continue
+            stem = os.path.splitext(fname)[0]
+            figure_items.append((path, _caption_from_stem(stem), nf()))
+            used.add(apath)
+
         logical_page = _packed_fig_pages(pdf, figure_items, logical_page)
 
         fig = _text_page(pdf, textwrap.dedent(

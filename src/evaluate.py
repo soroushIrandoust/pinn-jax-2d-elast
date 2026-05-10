@@ -61,7 +61,7 @@ def _evaluate_grid(params, model, cfg_p: ProblemConfig, cfg_net: NetworkConfig,
         "v": np.array(uv_hat[:, 1]).reshape(shape) * u_ref,
         "sxx": np.array(stresses[:, 0]).reshape(shape) * s0,
         "syy": np.array(stresses[:, 1]).reshape(shape) * s0,
-        "txy": np.array(stresses[:, 2]).reshape(shape) * s0,
+        "sxy": np.array(stresses[:, 2]).reshape(shape) * s0,
     }
 
     # Recover normalised strain from normalised stress via constitutive inverse.
@@ -80,7 +80,7 @@ def _evaluate_grid(params, model, cfg_p: ProblemConfig, cfg_net: NetworkConfig,
     eyy = eyy_hat * strain_scale
     exy = 0.5 * gxy_hat * strain_scale
 
-    s1, s2 = _principal_values_2x2(fields["sxx"], fields["syy"], fields["txy"])
+    s1, s2 = _principal_values_2x2(fields["sxx"], fields["syy"], fields["sxy"])
     e1, e2 = _principal_values_2x2(exx, eyy, exy)
 
     fields["exx"] = exx
@@ -109,7 +109,7 @@ def _evaluate_grid(params, model, cfg_p: ProblemConfig, cfg_net: NetworkConfig,
     fields["hole_boundary_u"] = np.array(uv_b_hat[:, 0]) * u_ref
     fields["hole_boundary_v"] = np.array(uv_b_hat[:, 1]) * u_ref
 
-    for key in ("u", "v", "sxx", "syy", "txy", "exx", "eyy", "exy", "s1", "s2", "e1", "e2"):
+    for key in ("u", "v", "sxx", "syy", "sxy", "exx", "eyy", "exy", "s1", "s2", "e1", "e2"):
         fields[key] = np.where(hole_mask, np.nan, fields[key])
 
     return fields
@@ -146,5 +146,5 @@ def compute_summary_metrics(res: dict) -> dict:
         "v_max": float(np.nanmax(np.abs(res["v"]))),
         "sxx_max": float(np.nanmax(res["sxx"])),
         "syy_min": float(np.nanmin(res["syy"])),
-        "txy_abs_max": float(np.nanmax(np.abs(res["txy"]))),
+        "sxy_abs_max": float(np.nanmax(np.abs(res["sxy"]))),
     }

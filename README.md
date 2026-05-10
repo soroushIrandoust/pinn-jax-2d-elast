@@ -1,35 +1,54 @@
 # 2-D Elasticity PINN
 
-Physics-informed neural network for 2-D linear elasticity in a rectangular plate with a circular hole, implemented with JAX, Flax, and Optax.
+Physics-informed neural network (PINN) for 2-D linear elasticity in a rectangular plate with a circular hole, implemented with JAX, Flax, and Optax.
 
-The current problem setup is a plate of size `10000 mm x 1000 mm` with a centered hole of radius `200 mm`, loaded in uniaxial tension on the right edge. The model uses a Fourier-feature MLP with additional hole-centered polar features to better capture the Kirsch-type stress concentration near the hole boundary.
+## Current Default Setup
+
+- Domain: `L=10000 mm`, `H=1000 mm`
+- Hole: centered at `(L/2, H/2)` with radius `200 mm`
+- Material: plane stress, `E=1000 MPa`, `nu=0.3`
+- Load: right-edge traction `sigma0=1 MPa`
+- Network: Fourier + hole-centered polar feature MLP (`[128,128,128,128]`, `tanh`, `n_fourier=8`, `n_polar=6`)
+- Hard BC ansatz: enforces `u=v=0` on the left edge when enabled
+- Training: Adam-only, `460000` epochs, warmup-cosine schedule
 
 ## Features
 
-- JAX-based PINN training with JIT compilation
-- Fourier and polar feature embeddings for improved stress-field resolution
-- Hard enforcement of the left-edge displacement boundary condition
-- Random collocation resampling to avoid fixed-grid aliasing
-- Full-domain and near-hole postprocessing plots
-- PDF report generation from saved results
+- JAX JIT-based PINN training
+- Fourier + polar embeddings for near-hole stress concentration resolution
+- Random resampling of collocation points every fixed interval
+- Full-domain, deformed-domain, near-hole zoom, and principal-field plotting
+- Interactive HTML plots with hover values (`results_interactive/`)
+- Principal stress/strain direction vector plots on undeformed geometry (PNG + interactive HTML)
+- PDF report generation from saved outputs
+
+## Plot Configuration Highlights
+
+Key plotting options are in `src/config.py` under `PlotConfig`:
+
+- `deformation_scale`
+- `interactive_width`, `interactive_field_height`, `interactive_vector_height`, `interactive_misc_height`
+- `show_deformed_reference_bc`
+- `auto_levels`, `field_level_mode`, `field_level_limits`
+- `cmap_stress`, `cmap_strain`, `cmap_displacement`
+
+All contour/vector limits and colormaps are applied consistently to both PNG and Plotly outputs.
 
 ## Repository Layout
 
-- `main.py`: main training entry point
-- `postprocess.py`: regenerate plots from saved checkpoints
-- `generate_report.py`: build a PDF report from results
-- `requirements.txt`: Python dependencies
-- `src/config.py`: problem, network, and training dataclasses
-- `src/train.py`: training loop
-- `src/evaluate.py`: grid evaluation and summary metrics
-- `src/network.py`: neural network definitions
-- `src/physics.py`: elasticity equations and residual/stress helpers
-- `src/sampler.py`: collocation-point sampling
-- `src/visualize.py`: plotting utilities
+- `main.py`: training + evaluation + plotting pipeline
+- `postprocess.py`: regenerate evaluation/plots from saved checkpoint
+- `generate_report.py`: build PDF report from saved results
+- `requirements.txt`: dependencies
+- `src/config.py`: dataclass configuration
+- `src/train.py`: training loop and checkpoint/history saving
+- `src/evaluate.py`: grid evaluation and derived fields
+- `src/network.py`: model architectures
+- `src/physics.py`: PDE and BC residual/loss terms
+- `src/sampler.py`: collocation/boundary sampling
+- `src/visualize.py`: static and interactive plotting
 
 ## Installation
-
-Create and activate your Python environment, then install dependencies:
 
 ```bash
 pip install -r requirements.txt
@@ -41,50 +60,60 @@ For GPU support on Linux/WSL with CUDA 12:
 pip install "jax[cuda12]" -r requirements.txt
 ```
 
-For CPU-only Windows usage:
-
-```bash
-pip install -r requirements.txt
-```
-
 ## Usage
 
-Train the default model:
+Train from scratch:
 
 ```bash
 python main.py
 ```
 
-Regenerate plots from saved checkpoints:
+Re-run postprocessing from saved checkpoints (no retraining):
 
 ```bash
 python postprocess.py
 python postprocess.py --checkpoint final
 ```
 
-Generate the PDF report from the default results directory:
+Generate a PDF report:
 
 ```bash
 python generate_report.py
-```
-
-Or point the report script to another results directory:
-
-```bash
 python generate_report.py --results_dir path/to/results
 ```
 
-## Outputs
+## Output Folders
 
-The default training run writes outputs to `results/`, including:
+`results/` contains static artifacts:
 
-- model checkpoints
-- loss history arrays
-- full-domain field plots
-- near-hole zoom plots
-- generated PDF report
+- `best_params.pkl`, `final_params.pkl`
+- `loss_history.npz`
+- static PNG plots (undeformed fields, undeformed principal fields, undeformed principal vectors, deformed fields, undeformed zoom fields, sampling)
+- `run.log`
+
+Current naming convention:
+
+- Undeformed full/principal fields: `undeformed_<field>.png`
+- Undeformed principal vectors: `undeformed_vector_<field>.png`
+- Undeformed near-hole zoom fields: `undeformed_zoom_<field>.png`
+- Deformed fields: `deformed_<field>.png`
+
+`results_interactive/` contains interactive HTML plots:
+
+- field contours with hover values (`x`, `y`, `value`)
+- deformed and near-hole interactive contours
+- interactive loss history
+- interactive sampling map
+- interactive undeformed principal-direction vector plots
+
+Current naming convention mirrors PNG stems, e.g.:
+
+- `undeformed_<field>.html`
+- `undeformed_vector_<field>.html`
+- `undeformed_zoom_<field>.html`
+- `deformed_<field>.html`
 
 ## Notes
 
-- The current training configuration is defined in `src/config.py`.
-- The report text is generated dynamically from configuration defaults.
+- If a training run is already in progress, you can apply code changes and then regenerate updated figures by running `postprocess.py` after training finishes.
+- Interactive outputs require `plotly` (included in `requirements.txt`).

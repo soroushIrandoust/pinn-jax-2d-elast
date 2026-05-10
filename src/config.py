@@ -1,7 +1,7 @@
 """Configuration dataclasses for the 2D elasticity PINN."""
 
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import Dict, Optional, Tuple
 
 
 @dataclass
@@ -10,9 +10,9 @@ class ProblemConfig:
 
     L: float = 10.0e3          # Domain length in x (mm)
     H: float = 1.0e3           # Domain height in y (mm)
-    E: float = 2.0e3           # Young's modulus (MPa) — 2 GPa = 2,000 MPa
+    E: float = 1.0e3           # Young's modulus (MPa) — 1 GPa = 1,000 MPa
     nu: float = 0.3            # Poisson's ratio (dimensionless)
-    sigma0: float = 2.0        # Applied normal stress at right boundary (MPa)
+    sigma0: float = 1.0        # Applied normal stress at right boundary (MPa)
     hole_radius: float = 200.0 # Circular hole radius (mm)
     mode: str = "plane_stress" # "plane_stress" | "plane_strain"
     length_unit: str = "mm"    # Label used in plots for spatial axes and displacements
@@ -60,15 +60,15 @@ class TrainingConfig:
     """Optimiser and sampling hyper-parameters."""
 
     # Collocation sampling
-    n_interior: int = 6144          # Interior points
+    n_interior: int = 4096          # Interior points
     n_boundary: int = 512           # Points per boundary side
-    n_hole: int = 1024              # Points on hole circumference
+    n_hole: int = 512               # Points on hole circumference
     n_midline: int = 512            # Points on y = H/2 symmetry line
-    near_hole_fraction: float = 0.30  # Fraction of interior points in near-hole annulus
+    near_hole_fraction: float = 0.30    # Fraction of interior points in near-hole annulus
     near_hole_outer_mult: float = 3.0   # Annulus outer radius in units of hole radius
 
     # Optimisation
-    epochs_adam: int = 300000
+    epochs_adam: int = 460000
     lr_init: float = 1e-3           # Peak learning rate
     lr_final: float = 1e-5          # Final learning rate
     warmup_steps: int = 1000        # Linear warm-up steps
@@ -92,7 +92,62 @@ class TrainingConfig:
 class PlotConfig:
     """Post-processing and visualisation parameters."""
 
-    deformation_scale: float = 100.0   # Deformed-configuration magnification
+    deformation_scale: float = 500.0   # Deformed-configuration magnification
+    interactive_width: int = 1800      # HTML figure width in px (initial)
+    interactive_field_height: int = 620
+    interactive_vector_height: int = 760
+    interactive_misc_height: int = 560
+    interactive_responsive: bool = True
+    show_deformed_reference_bc: bool = False
+    auto_levels: bool = False          # If True, all fields use local min/max
+
+    # Per-field level modes:
+    #   fixed            -> use field_level_limits values
+    #   auto             -> [min(data), max(data)]
+    #   nonnegative_auto -> [0, max(data)]
+    #   symmetric_auto   -> [-max(abs(data)), +max(abs(data))]
+    field_level_mode: Dict[str, str] = field(default_factory=lambda: {
+        "u": "nonnegative_auto",
+        "v": "symmetric_auto",
+        "umag": "auto",
+        "sxx": "fixed",
+        "syy": "fixed",
+        "sxy": "fixed",
+        "exx": "symmetric_auto",
+        "eyy": "symmetric_auto",
+        "exy": "symmetric_auto",
+        "s1": "fixed",
+        "s2": "fixed",
+        "e1": "auto",
+        "e2": "auto",
+    })
+
+    # Colormap selections — applied to all stress, strain, and displacement plots.
+    # Stress options  : "RdYlGn_r", "parula", "hot_r", "plasma", "inferno", "RdBu_r", "coolwarm", "seismic", "jet"
+    # Strain options  : "parula", "viridis", "plasma", "magma", "YlOrRd", "coolwarm", "RdBu_r"
+    # Displacement options: "RdBu", "parula", "coolwarm", "seismic", "bwr", "PiYG", "PRGn"
+    cmap_stress: str = "RdYlGn_r"
+    cmap_strain: str = "parula"
+    cmap_displacement: str = "RdBu"
+
+    # Limits used when mode is "fixed".
+    field_level_limits: Dict[str, Tuple[Optional[float], Optional[float]]] = field(
+        default_factory=lambda: {
+            "u": (0.0, None),
+            "v": (None, None),
+            "umag": (None, None),
+            "sxx": (0.0, 3.0),
+            "syy": (-1.0, 1.0),
+            "sxy": (-1.0, 1.0),
+            "exx": (None, None),
+            "eyy": (None, None),
+            "exy": (None, None),
+            "s1": (0.0, 3.0),
+            "s2": (-1.0, 1.0),
+            "e1": (None, None),
+            "e2": (None, None),
+        }
+    )
 
 
 @dataclass
