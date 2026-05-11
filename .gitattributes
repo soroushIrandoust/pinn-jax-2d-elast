@@ -1,0 +1,3 @@
+# Exclude generated result artifacts from GitHub language statistics
+results/** linguist-generated=true
+results_interactive/** linguist-generated=true
