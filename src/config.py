@@ -68,11 +68,11 @@ class TrainingConfig:
     near_hole_outer_mult: float = 3.0   # Annulus outer radius in units of hole radius
 
     # Optimisation
-    epochs_adam: int = 460000
+    epochs_adam: int = 700000
     lr_init: float = 1e-3           # Peak learning rate
-    lr_final: float = 1e-5          # Final learning rate
+    lr_final: float = 5e-6          # Final learning rate
     warmup_steps: int = 1000        # Linear warm-up steps
-    lr_decay_steps: int = 460000    # Reach lr_final by this step
+    lr_decay_steps: int = 700000    # Reach lr_final by this step
     seed: int = 42
     resample_every: int = 2000      # Periodic refresh to avoid fixed-batch collapse
 

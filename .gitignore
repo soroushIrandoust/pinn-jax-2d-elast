@@ -51,9 +51,12 @@ results_test/
 !results/**
 
 # Model checkpoints and histories
-#**/best_params.pkl
-#**/final_params.pkl
-#**/loss_history.npz
+**/best_params.pkl
+**/final_params.pkl
+**/loss_history.npz
+
+# Large interactive HTML outputs (exceed GitHub 100MB limit)
+**/loss_history.html
 
 # Generated figures (commonly created under results folders)
 #results/**/*.png

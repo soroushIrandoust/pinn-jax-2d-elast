@@ -109,6 +109,7 @@ def train(cfg: Config):
     model   : Flax module
     history : dict of loss arrays
     """
+
     rng = jax.random.PRNGKey(cfg.training.seed)
     rng, key_init, key_batch = jax.random.split(rng, 3)
 
@@ -298,8 +299,10 @@ def train(cfg: Config):
             )
 
         # Early-stop on prolonged base-loss plateau.
+        # Patience countdown starts only after early_stop_min_epochs.
         if cfg.training.early_stop_enable:
-            if epoch >= cfg.training.early_stop_min_epochs and (epoch - last_improve_epoch) >= cfg.training.early_stop_patience:
+            patience_anchor_epoch = max(last_improve_epoch, cfg.training.early_stop_min_epochs)
+            if epoch >= cfg.training.early_stop_min_epochs and (epoch - patience_anchor_epoch) >= cfg.training.early_stop_patience:
                 tqdm.write(
                     f"Early stopping at epoch {epoch}: no base-loss improvement for "
                     f"{cfg.training.early_stop_patience} epochs "

@@ -51,11 +51,11 @@ _This section is auto-generated from `src/config.py` by `python sync_readme_conf
 | `n_midline` | `512` |
 | `near_hole_fraction` | `0.5` |
 | `near_hole_outer_mult` | `3.0` |
-| `epochs_adam` | `460000` |
+| `epochs_adam` | `700000` |
 | `lr_init` | `0.001` |
-| `lr_final` | `1e-05` |
+| `lr_final` | `5e-06` |
 | `warmup_steps` | `1000` |
-| `lr_decay_steps` | `460000` |
+| `lr_decay_steps` | `700000` |
 | `seed` | `42` |
 | `resample_every` | `2000` |
 | `use_adaptive_weights` | `True` |
@@ -83,10 +83,13 @@ _This section is auto-generated from `src/config.py` by `python sync_readme_conf
 |---|---|
 | `deformation_scale` | `250.0` |
 | `interactive_width` | `1800` |
-| `interactive_field_height` | `620` |
-| `interactive_vector_height` | `760` |
-| `interactive_misc_height` | `560` |
+| `interactive_field_height` | `900` |
+| `interactive_vector_height` | `900` |
+| `interactive_misc_height` | `900` |
 | `interactive_responsive` | `True` |
+| `interactive_lock_aspect` | `True` |
+| `interactive_colorbar_len_fraction` | `0.995` |
+| `hole_zoom_radius_factor` | `3.0` |
 | `png_contour_levels` | `32` |
 | `annotate_field_minmax` | `True` |
 | `field_stats_digits` | `4` |
