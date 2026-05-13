@@ -1,4 +1,4 @@
-"""Plotting utilities for full-field and near-hole PINN outputs."""
+﻿"""Plotting utilities for full-field and near-hole PINN outputs."""
 
 import os
 import importlib
@@ -80,6 +80,33 @@ def _finite_min_max(values) -> tuple[float, float]:
     return float(np.min(finite)), float(np.max(finite))
 
 
+def _field_stats_text(values, digits: int = 4) -> str:
+    vmin, vmax = _finite_min_max(values)
+    return f"min={vmin:.{digits}e}\nmax={vmax:.{digits}e}"
+
+
+def _annotate_field_stats_mpl(ax, values, plot_cfg: PlotConfig | None,
+                              extra_lines: str | None = None):
+    cfg = _resolve_plot_cfg(plot_cfg)
+    if not cfg.annotate_field_minmax:
+        return
+    txt = _field_stats_text(values, digits=int(cfg.field_stats_digits))
+    if extra_lines:
+        txt = f"{txt}\n{extra_lines}"
+    fig = ax.figure
+    fig.text(
+        0.985,
+        0.02,
+        txt,
+        transform=fig.transFigure,
+        ha="right",
+        va="bottom",
+        fontsize=6,
+        bbox=dict(boxstyle="round,pad=0.18", facecolor="none", edgecolor="none", alpha=0.0),
+        zorder=20,
+    )
+
+
 def _canonical_field_key(field_key: str) -> str:
     key = str(field_key)
     for prefix in (
@@ -144,8 +171,23 @@ def _resolve_plot_cfg(plot_cfg: PlotConfig | None) -> PlotConfig:
     return plot_cfg if plot_cfg is not None else PlotConfig()
 
 
-def _mpl_to_plotly_colorscale(cmap_name: str, n: int = 256):
+def _mpl_to_plotly_colorscale(cmap_name: str, n: int = 256, discrete_levels: int | None = None):
     cmap = _get_cmap(cmap_name)
+
+    if discrete_levels is not None and discrete_levels >= 2:
+        # Piecewise-constant colorscale: duplicate stops at each bin edge so
+        # Plotly renders discrete color bands instead of continuous gradients.
+        n_bins = int(discrete_levels)
+        edges = np.linspace(0.0, 1.0, n_bins + 1)
+        mids = 0.5 * (edges[:-1] + edges[1:])
+        scale = []
+        for i in range(n_bins):
+            r, g, b, _ = cmap(mids[i])
+            color = f"rgb({int(255 * r)},{int(255 * g)},{int(255 * b)})"
+            scale.append([float(edges[i]), color])
+            scale.append([float(edges[i + 1]), color])
+        return scale
+
     scale = []
     for i in range(n):
         t = i / max(n - 1, 1)
@@ -200,11 +242,16 @@ def _save_interactive_field(x, y, z, title: str, cmap: str,
                             vmin=None, vmax=None, hole_line=None,
                             plot_cfg: PlotConfig | None = None,
                             irregular_coords: bool = False,
-                            ref_bc_overlay: dict | None = None):
+                            ref_bc_overlay: dict | None = None,
+                            colorbar_title: str | None = None,
+                            extra_annotation_lines: str | None = None):
     if not _interactive_available():
         return
 
     cfg = _resolve_plot_cfg(plot_cfg)
+    cbar_title = colorbar_title if colorbar_title is not None else title
+    n_discrete = max(int(cfg.png_contour_levels), 2)
+    plotly_scale = _mpl_to_plotly_colorscale(cmap, discrete_levels=n_discrete)
 
     x_arr = np.asarray(x)
     y_arr = np.asarray(y)
@@ -229,14 +276,20 @@ def _save_interactive_field(x, y, z, title: str, cmap: str,
                 mode="markers",
                 marker=dict(
                     color=z_plot,
-                    colorscale=_mpl_to_plotly_colorscale(cmap),
+                    colorscale=plotly_scale,
                     autocolorscale=False,
                     cmin=vmin,
                     cmax=vmax,
                     cauto=(vmin is None and vmax is None),
                     size=3,
                     opacity=1.0,
-                    colorbar=dict(title=title, lenmode="fraction", len=cb_len, y=0.5, yanchor="middle"),
+                    colorbar=dict(
+                        title=dict(text=cbar_title, side="top"),
+                        lenmode="fraction",
+                        len=min(0.995, cb_len * 1.28),
+                        y=0.5,
+                        yanchor="middle",
+                    ),
                 ),
                 hovertemplate=(
                     "x=%{x:.4g}<br>"
@@ -260,9 +313,15 @@ def _save_interactive_field(x, y, z, title: str, cmap: str,
                 zmin=vmin,
                 zmax=vmax,
                 zauto=(vmin is None and vmax is None),
-                colorscale=_mpl_to_plotly_colorscale(cmap),
+                colorscale=plotly_scale,
                 autocolorscale=False,
-                colorbar=dict(title=title, lenmode="fraction", len=cb_len, y=0.5, yanchor="middle"),
+                colorbar=dict(
+                    title=dict(text=cbar_title, side="top"),
+                    lenmode="fraction",
+                    len=min(0.995, cb_len * 1.28),
+                    y=0.5,
+                    yanchor="middle",
+                ),
                 customdata=custom,
                 hovertemplate=(
                     "x=%{customdata[0]:.4g}<br>"
@@ -322,7 +381,6 @@ def _save_interactive_field(x, y, z, title: str, cmap: str,
     x_range, y_range = _plotly_xy_ranges(x_arr, y_arr)
 
     fig.update_layout(
-        title=title,
         xaxis_title=xlabel,
         yaxis_title=ylabel,
         xaxis=dict(range=x_range),
@@ -331,6 +389,24 @@ def _save_interactive_field(x, y, z, title: str, cmap: str,
         width=cfg.interactive_width,
         height=cfg.interactive_field_height,
     )
+    if cfg.annotate_field_minmax:
+        fig.add_annotation(
+            x=0.985,
+            y=0.01,
+            xref="paper",
+            yref="paper",
+            xanchor="right",
+            yanchor="bottom",
+            align="right",
+            text=(
+                _field_stats_text(z, digits=int(cfg.field_stats_digits))
+                + (f"\n{extra_annotation_lines}" if extra_annotation_lines else "")
+            ).replace("\n", "<br>"),
+            showarrow=False,
+            bgcolor="rgba(0,0,0,0)",
+            borderwidth=0,
+            font=dict(size=12),
+        )
     fig.update_yaxes(scaleanchor="x", scaleratio=1, constrain="domain")
     fig.write_html(
         html_path,
@@ -411,7 +487,9 @@ def _vector_length_scale(mag, vmin=None, vmax=None,
 def _save_vector_plot_png(x, y, vx, vy, mag, title, out_path,
                           xlabel, ylabel, hole_center, hole_radius,
                           cmap="RdYlGn_r", vmin=None, vmax=None,
-                          hole_outline=None):
+                          hole_outline=None,
+                          plot_cfg: PlotConfig | None = None,
+                          colorbar_title: str | None = None):
     fig, ax = plt.subplots(1, 1, figsize=(7.5, 3.2))
     finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(vx) & np.isfinite(vy) & np.isfinite(mag)
     x_f = x[finite]
@@ -444,11 +522,12 @@ def _save_vector_plot_png(x, y, vx, vy, mag, title, out_path,
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.set_title(title)
     # Axis-locked colorbar: height always matches the plate axis height.
     cax = ax.inset_axes([1.02, 0.0, 0.025, 1.0])
     cb = fig.colorbar(q, cax=cax)
+    cb.ax.set_title(colorbar_title if colorbar_title is not None else "value", fontsize=8, pad=3)
     cb.ax.tick_params(labelsize=7)
+    _annotate_field_stats_mpl(ax, mag_f, plot_cfg)
     plt.tight_layout()
     plt.savefig(out_path, dpi=170, bbox_inches="tight")
     plt.close(fig)
@@ -456,11 +535,15 @@ def _save_vector_plot_png(x, y, vx, vy, mag, title, out_path,
 
 def _save_vector_plot_html(x, y, vx, vy, mag, title, out_path,
                            xlabel, ylabel, hole_line, vmin=None, vmax=None,
-                           cmap="RdYlGn_r", plot_cfg: PlotConfig | None = None):
+                           cmap="RdYlGn_r", plot_cfg: PlotConfig | None = None,
+                           colorbar_title: str | None = None):
     if not _interactive_available():
         return
 
     cfg = _resolve_plot_cfg(plot_cfg)
+    cbar_title = colorbar_title if colorbar_title is not None else "value"
+    n_discrete = max(int(cfg.png_contour_levels), 2)
+    plotly_scale = _mpl_to_plotly_colorscale(cmap, discrete_levels=n_discrete)
 
     finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(vx) & np.isfinite(vy) & np.isfinite(mag)
     x_f = x[finite]
@@ -512,14 +595,20 @@ def _save_vector_plot_html(x, y, vx, vy, mag, title, out_path,
             mode="markers",
             marker=dict(
                 color=m_f,
-                colorscale=_mpl_to_plotly_colorscale(cmap),
+                colorscale=plotly_scale,
                 autocolorscale=False,
                 cmin=cmin,
                 cmax=cmax,
                 showscale=True,
                 size=1,
                 opacity=0.0,
-                colorbar=dict(title="Principal value", lenmode="fraction", len=cb_len, y=0.5, yanchor="middle"),
+                colorbar=dict(
+                    title=dict(text=cbar_title, side="top"),
+                    lenmode="fraction",
+                    len=min(0.995, cb_len * 1.28),
+                    y=0.5,
+                    yanchor="middle",
+                ),
             ),
             customdata=np.column_stack([x_f, y_f, vx_f, vy_f]),
             hovertemplate=(
@@ -570,7 +659,6 @@ def _save_vector_plot_html(x, y, vx, vy, mag, title, out_path,
     x_range, y_range = _plotly_xy_ranges(x_f, y_f)
 
     fig.update_layout(
-        title=title,
         xaxis_title=xlabel,
         yaxis_title=ylabel,
         xaxis=dict(range=x_range),
@@ -579,6 +667,21 @@ def _save_vector_plot_html(x, y, vx, vy, mag, title, out_path,
         width=cfg.interactive_width,
         height=cfg.interactive_vector_height,
     )
+    if cfg.annotate_field_minmax:
+        fig.add_annotation(
+            x=0.985,
+            y=0.01,
+            xref="paper",
+            yref="paper",
+            xanchor="right",
+            yanchor="bottom",
+            align="right",
+            text=_field_stats_text(m_f, digits=int(cfg.field_stats_digits)).replace("\n", "<br>"),
+            showarrow=False,
+            bgcolor="rgba(0,0,0,0)",
+            borderwidth=0,
+            font=dict(size=12),
+        )
     fig.update_yaxes(scaleanchor="x", scaleratio=1, constrain="domain")
     fig.write_html(
         out_path,
@@ -588,7 +691,8 @@ def _save_vector_plot_html(x, y, vx, vy, mag, title, out_path,
 
 def _field_panel(ax, x, y, z, title: str, cmap: str = "RdBu_r",
                  xlabel: str = "x", ylabel: str = "y",
-                 xlim=None, ylim=None, vmin=None, vmax=None, aspect: str = "equal"):
+                 xlim=None, ylim=None, vmin=None, vmax=None, aspect: str = "equal",
+                 plot_cfg: PlotConfig | None = None):
     """Single contourf panel with colour-bar."""
     z_ma = np.ma.array(z)
     finite = z_ma.compressed()
@@ -597,25 +701,24 @@ def _field_panel(ax, x, y, z, title: str, cmap: str = "RdBu_r",
         finite = np.array([0.0])
     
     # Use provided limits or auto
+    cfg = _resolve_plot_cfg(plot_cfg)
+
     if vmin is None:
         vmin = finite.min()
     if vmax is None:
         vmax = finite.max()
     
-    # Clamp values and lock normalization to requested bounds so colorbars do
-    # not drift to data min/max when fixed limits are requested.
-    if vmin is not None and vmax is not None and vmin < vmax:
-        z_plot = np.ma.clip(z_ma, vmin, vmax)
-        levels = np.linspace(vmin, vmax, 64)
-        norm = Normalize(vmin=vmin, vmax=vmax, clip=True)
-        cf = ax.contourf(x, y, z_plot, levels=levels, cmap=_get_cmap(cmap), norm=norm)
-    else:
-        z_plot = z_ma
-        levels = 64
-        cf = ax.contourf(x, y, z_plot, levels=levels, cmap=_get_cmap(cmap))
+    if vmax <= vmin:
+        vmax = vmin + 1e-12
+
+    # Discrete contour bands for PNG: controlled by png_contour_levels.
+    n_levels = max(int(cfg.png_contour_levels), 2)
+    levels = np.linspace(vmin, vmax, n_levels)
+    z_plot = np.ma.clip(z_ma, vmin, vmax)
+    norm = Normalize(vmin=vmin, vmax=vmax, clip=True)
+    cf = ax.contourf(x, y, z_plot, levels=levels, cmap=_get_cmap(cmap), norm=norm)
     ax.set_xlabel(xlabel, fontsize=6)
     ax.set_ylabel(ylabel, fontsize=6)
-    ax.set_title(title, fontsize=7)
     ax.tick_params(labelsize=5)
     ax.set_aspect(aspect, adjustable="box")
     if xlim is not None:
@@ -627,10 +730,10 @@ def _field_panel(ax, x, y, z, title: str, cmap: str = "RdBu_r",
     # not the full figure canvas.
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("right", size="2.0%", pad=0.2)
-    cb = ax.figure.colorbar(cf, cax=cax)
-    if vmin is not None and vmax is not None and vmin < vmax:
-        cb.mappable.set_clim(vmin, vmax)
-        cb.set_ticks(np.linspace(vmin, vmax, 7))
+    cb = ax.figure.colorbar(cf, cax=cax, boundaries=levels)
+    cb.ax.set_title(title, fontsize=6, pad=2)
+    cb.mappable.set_clim(vmin, vmax)
+    cb.set_ticks(np.linspace(vmin, vmax, min(7, n_levels)))
     cb.ax.tick_params(labelsize=5)
 
 
@@ -764,15 +867,15 @@ def plot_fields(results: dict, save_dir: str = "results",
     _cd = _cfg.cmap_displacement
     _ce = _cfg.cmap_strain
     field_specs = [
-        ("u",   f"u — displacement ({lu})",  _cd),
-        ("v",   f"v — displacement ({lu})",  _cd),
-        ("umag", f"|u| — displacement magnitude ({lu})", _cd),
-        ("sxx", f"σ_xx ({su})",              _cs),
-        ("syy", f"σ_yy ({su})",              _cs),
-        ("sxy", f"σ_xy ({su})",              _cs),
-        ("exx", f"ε_xx (-)",                 _ce),
-        ("eyy", f"ε_yy (-)",                 _ce),
-        ("exy", f"ε_xy (-)",                 _ce),
+        ("u", "u", _cd),
+        ("v", "v", _cd),
+        ("umag", "|u|", _cd),
+        ("sxx", "σ_xx", _cs),
+        ("syy", "σ_yy", _cs),
+        ("sxy", "σ_xy", _cs),
+        ("exx", "ε_xx", _ce),
+        ("eyy", "ε_yy", _ce),
+        ("exy", "ε_xy", _ce),
     ]
 
     xlabel = f"x ({lu})"
@@ -791,7 +894,25 @@ def plot_fields(results: dict, save_dir: str = "results",
         field_plot = np.nan_to_num(plot_data[key], nan=0.0)
         vmin, vmax = _resolve_levels(key, field_plot, plot_cfg)
         fig, ax = plt.subplots(1, 1, figsize=(12.0, 2.0))
-        _field_panel(ax, x, y, field_plot, label, cmap, xlabel, ylabel, vmin=vmin, vmax=vmax, aspect="equal")
+        _field_panel(
+            ax,
+            x,
+            y,
+            field_plot,
+            label,
+            cmap,
+            xlabel,
+            ylabel,
+            vmin=vmin,
+            vmax=vmax,
+            aspect="equal",
+            plot_cfg=plot_cfg,
+        )
+        _annotate_field_stats_mpl(
+            ax,
+            field_plot,
+            plot_cfg,
+        )
         _draw_hole(ax, hole_center, hole_radius)
         plt.tight_layout()
         path = os.path.join(save_dir, f"undeformed_{key}.png")
@@ -805,11 +926,12 @@ def plot_fields(results: dict, save_dir: str = "results",
             vmin=vmin, vmax=vmax,
             hole_line=(hx, hy),
             plot_cfg=plot_cfg,
+            colorbar_title=label,
         )
 
-    print(f"  Field plots → {save_dir}/")
+    print(f"  Field plots -> {save_dir}/")
     if _interactive_available():
-        print(f"  Interactive field plots → {interactive_dir}/")
+        print(f"  Interactive field plots -> {interactive_dir}/")
     else:
         print("  Interactive field plots skipped (install plotly)")
 
@@ -827,10 +949,10 @@ def plot_principal_fields(results: dict, save_dir: str = "results",
     _cs = _cfg.cmap_stress
     _ce = _cfg.cmap_strain
     field_specs = [
-        ("s1", f"σ1 ({stress_unit})", _cs),
-        ("s2", f"σ2 ({stress_unit})", _cs),
-        ("e1", "ε1 (-)", _ce),
-        ("e2", "ε2 (-)", _ce),
+        ("s1", "σ1", _cs),
+        ("s2", "σ2", _cs),
+        ("e1", "ε1", _ce),
+        ("e2", "ε2", _ce),
     ]
     xlabel = f"x ({length_unit})"
     ylabel = f"y ({length_unit})"
@@ -844,7 +966,25 @@ def plot_principal_fields(results: dict, save_dir: str = "results",
         field_plot = np.nan_to_num(results[key], nan=0.0)
         vmin, vmax = _resolve_levels(key, field_plot, plot_cfg)
         fig, ax = plt.subplots(1, 1, figsize=(12.0, 2.0))
-        _field_panel(ax, x, y, field_plot, label, cmap, xlabel, ylabel, vmin=vmin, vmax=vmax, aspect="equal")
+        _field_panel(
+            ax,
+            x,
+            y,
+            field_plot,
+            label,
+            cmap,
+            xlabel,
+            ylabel,
+            vmin=vmin,
+            vmax=vmax,
+            aspect="equal",
+            plot_cfg=plot_cfg,
+        )
+        _annotate_field_stats_mpl(
+            ax,
+            field_plot,
+            plot_cfg,
+        )
         _draw_hole(ax, hole_center, hole_radius)
         plt.tight_layout()
         path = os.path.join(save_dir, f"undeformed_{key}.png")
@@ -858,11 +998,12 @@ def plot_principal_fields(results: dict, save_dir: str = "results",
             vmin=vmin, vmax=vmax,
             hole_line=(hx, hy),
             plot_cfg=plot_cfg,
+            colorbar_title=label,
         )
 
-    print(f"  Principal plots → {save_dir}/")
+    print(f"  Principal plots -> {save_dir}/")
     if _interactive_available():
-        print(f"  Interactive principal plots → {interactive_dir}/")
+        print(f"  Interactive principal plots -> {interactive_dir}/")
 
 
 def plot_principal_vectors(results: dict, save_dir: str = "results",
@@ -909,10 +1050,10 @@ def plot_principal_vectors(results: dict, save_dir: str = "results",
     hy = hole_center[1] + hole_radius * np.sin(np.linspace(0.0, 2.0 * np.pi, 361))
 
     specs = [
-        ("s1", "undeformed_vector_s1", f"Principal stress direction for σ1 ({stress_unit})", ds1x, ds1y, s1, _resolve_plot_cfg(plot_cfg).cmap_stress),
-        ("s2", "undeformed_vector_s2", f"Principal stress direction for σ2 ({stress_unit})", ds2x, ds2y, s2, _resolve_plot_cfg(plot_cfg).cmap_stress),
-        ("e1", "undeformed_vector_e1", "Principal strain direction for ε1 (-)", de1x, de1y, e1, _resolve_plot_cfg(plot_cfg).cmap_strain),
-        ("e2", "undeformed_vector_e2", "Principal strain direction for ε2 (-)", de2x, de2y, e2, _resolve_plot_cfg(plot_cfg).cmap_strain),
+        ("s1", "undeformed_vector_s1", "σ1", ds1x, ds1y, s1, _resolve_plot_cfg(plot_cfg).cmap_stress),
+        ("s2", "undeformed_vector_s2", "σ2", ds2x, ds2y, s2, _resolve_plot_cfg(plot_cfg).cmap_stress),
+        ("e1", "undeformed_vector_e1", "ε1", de1x, de1y, e1, _resolve_plot_cfg(plot_cfg).cmap_strain),
+        ("e2", "undeformed_vector_e2", "ε2", de2x, de2y, e2, _resolve_plot_cfg(plot_cfg).cmap_strain),
     ]
 
     xlabel = f"x ({length_unit})"
@@ -926,6 +1067,8 @@ def plot_principal_vectors(results: dict, save_dir: str = "results",
             xlabel, ylabel, hole_center, hole_radius,
             cmap=cmap,
             vmin=vmin, vmax=vmax,
+            plot_cfg=plot_cfg,
+            colorbar_title=title,
         )
 
         html_path = os.path.join(interactive_dir, f"{stem}.html")
@@ -935,11 +1078,12 @@ def plot_principal_vectors(results: dict, save_dir: str = "results",
             vmin=vmin, vmax=vmax,
             cmap=cmap,
             plot_cfg=plot_cfg,
+            colorbar_title=title,
         )
 
-    print(f"  Principal vector plots → {save_dir}/")
+    print(f"  Principal vector plots -> {save_dir}/")
     if _interactive_available():
-        print(f"  Interactive principal vectors → {interactive_dir}/")
+        print(f"  Interactive principal vectors -> {interactive_dir}/")
 
 
 def plot_deformed_fields(results: dict, save_dir: str = "results",
@@ -969,19 +1113,19 @@ def plot_deformed_fields(results: dict, save_dir: str = "results",
 
     # spec: (field_key, field_array, output_stem, title, cmap)
     field_specs = [
-        ("u", results["u"],   "deformed_u",    f"u on deformed shape ({length_unit}), mag={deformation_scale:g}", cfg_plot.cmap_displacement),
-        ("v", results["v"],   "deformed_v",    f"v on deformed shape ({length_unit}), mag={deformation_scale:g}", cfg_plot.cmap_displacement),
-        ("umag", umag,            "deformed_umag", f"|u| on deformed shape ({length_unit}), mag={deformation_scale:g}", cfg_plot.cmap_displacement),
-        ("sxx", results["sxx"], "deformed_sxx",  f"σ_xx on deformed shape ({stress_unit}), mag={deformation_scale:g}", cfg_plot.cmap_stress),
-        ("syy", results["syy"], "deformed_syy",  f"σ_yy on deformed shape ({stress_unit}), mag={deformation_scale:g}", cfg_plot.cmap_stress),
-        ("sxy", sxy_field,       "deformed_sxy",  f"σ_xy on deformed shape ({stress_unit}), mag={deformation_scale:g}", cfg_plot.cmap_stress),
-        ("s1", results.get("s1"), "deformed_s1",  f"σ1 on deformed shape ({stress_unit}), mag={deformation_scale:g}", cfg_plot.cmap_stress),
-        ("s2", results.get("s2"), "deformed_s2",  f"σ2 on deformed shape ({stress_unit}), mag={deformation_scale:g}", cfg_plot.cmap_stress),
-        ("exx", results.get("exx"), "deformed_exx", f"ε_xx on deformed shape, mag={deformation_scale:g}", cfg_plot.cmap_strain),
-        ("eyy", results.get("eyy"), "deformed_eyy", f"ε_yy on deformed shape, mag={deformation_scale:g}", cfg_plot.cmap_strain),
-        ("exy", results.get("exy"), "deformed_exy", f"ε_xy on deformed shape, mag={deformation_scale:g}", cfg_plot.cmap_strain),
-        ("e1", results.get("e1"), "deformed_e1", f"ε1 on deformed shape, mag={deformation_scale:g}", cfg_plot.cmap_strain),
-        ("e2", results.get("e2"), "deformed_e2", f"ε2 on deformed shape, mag={deformation_scale:g}", cfg_plot.cmap_strain),
+        ("u", results["u"],   "deformed_u",    "u", cfg_plot.cmap_displacement),
+        ("v", results["v"],   "deformed_v",    "v", cfg_plot.cmap_displacement),
+        ("umag", umag,            "deformed_umag", "|u|", cfg_plot.cmap_displacement),
+        ("sxx", results["sxx"], "deformed_sxx",  "σ_xx", cfg_plot.cmap_stress),
+        ("syy", results["syy"], "deformed_syy",  "σ_yy", cfg_plot.cmap_stress),
+        ("sxy", sxy_field,       "deformed_sxy",  "σ_xy", cfg_plot.cmap_stress),
+        ("s1", results.get("s1"), "deformed_s1",  "σ1", cfg_plot.cmap_stress),
+        ("s2", results.get("s2"), "deformed_s2",  "σ2", cfg_plot.cmap_stress),
+        ("exx", results.get("exx"), "deformed_exx", "ε_xx", cfg_plot.cmap_strain),
+        ("eyy", results.get("eyy"), "deformed_eyy", "ε_yy", cfg_plot.cmap_strain),
+        ("exy", results.get("exy"), "deformed_exy", "ε_xy", cfg_plot.cmap_strain),
+        ("e1", results.get("e1"), "deformed_e1", "ε1", cfg_plot.cmap_strain),
+        ("e2", results.get("e2"), "deformed_e2", "ε2", cfg_plot.cmap_strain),
     ]
     xlabel = f"x_deformed ({length_unit})"
     ylabel = f"y_deformed ({length_unit})"
@@ -1014,7 +1158,28 @@ def plot_deformed_fields(results: dict, save_dir: str = "results",
         field_plot = np.ma.array(field_filled, mask=(hole_mask_def | orig_nan_mask))
         vmin, vmax = _resolve_levels(field_key, field_plot, plot_cfg)
         fig, ax = plt.subplots(1, 1, figsize=(12.0, 2.0))
-        _field_panel(ax, x_def, y_def, field_plot, label, cmap, xlabel, ylabel, xlim=xlim, ylim=ylim, vmin=vmin, vmax=vmax, aspect="equal")
+        _field_panel(
+            ax,
+            x_def,
+            y_def,
+            field_plot,
+            label,
+            cmap,
+            xlabel,
+            ylabel,
+            xlim=xlim,
+            ylim=ylim,
+            vmin=vmin,
+            vmax=vmax,
+            aspect="equal",
+            plot_cfg=plot_cfg,
+        )
+        _annotate_field_stats_mpl(
+            ax,
+            field_plot,
+            plot_cfg,
+            extra_lines=f"deformation scale={deformation_scale:g}",
+        )
         if bc_overlay is not None:
             _draw_original_bc_overlay(ax, bc_overlay)
         _draw_deformed_hole(ax, hole_center, hole_radius, deformation_scale, results)
@@ -1032,11 +1197,13 @@ def plot_deformed_fields(results: dict, save_dir: str = "results",
             plot_cfg=plot_cfg,
             irregular_coords=True,
             ref_bc_overlay=bc_overlay,
+            colorbar_title=label,
+            extra_annotation_lines=f"deformation scale={deformation_scale:g}",
         )
 
-    print(f"  Deformed plots → {save_dir}/")
+    print(f"  Deformed plots -> {save_dir}/")
     if _interactive_available():
-        print(f"  Interactive deformed plots → {interactive_dir}/")
+        print(f"  Interactive deformed plots -> {interactive_dir}/")
 
 
 def plot_hole_zoom(results: dict, save_dir: str = "results",
@@ -1052,16 +1219,16 @@ def plot_hole_zoom(results: dict, save_dir: str = "results",
 
     _cfg = _resolve_plot_cfg(plot_cfg)
     field_specs = [
-        ("sxx", f"σ_xx near hole ({su})", _cfg.cmap_stress),
-        ("syy", f"σ_yy near hole ({su})", _cfg.cmap_stress),
-        ("sxy", f"σ_xy near hole ({su})", _cfg.cmap_stress),
-        ("s1", f"σ1 near hole ({su})", _cfg.cmap_stress),
-        ("s2", f"σ2 near hole ({su})", _cfg.cmap_stress),
-        ("exx", "ε_xx near hole (-)", _cfg.cmap_strain),
-        ("eyy", "ε_yy near hole (-)", _cfg.cmap_strain),
-        ("exy", "ε_xy near hole (-)", _cfg.cmap_strain),
-        ("e1", "ε1 near hole (-)", _cfg.cmap_strain),
-        ("e2", "ε2 near hole (-)", _cfg.cmap_strain),
+        ("sxx", "σ_xx", _cfg.cmap_stress),
+        ("syy", "σ_yy", _cfg.cmap_stress),
+        ("sxy", "σ_xy", _cfg.cmap_stress),
+        ("s1", "σ1", _cfg.cmap_stress),
+        ("s2", "σ2", _cfg.cmap_stress),
+        ("exx", "ε_xx", _cfg.cmap_strain),
+        ("eyy", "ε_yy", _cfg.cmap_strain),
+        ("exy", "ε_xy", _cfg.cmap_strain),
+        ("e1", "ε1", _cfg.cmap_strain),
+        ("e2", "ε2", _cfg.cmap_strain),
     ]
     xlabel = f"x ({lu})"
     ylabel = f"y ({lu})"
@@ -1075,7 +1242,21 @@ def plot_hole_zoom(results: dict, save_dir: str = "results",
         field_plot = np.nan_to_num(results[key], nan=0.0)
         vmin, vmax = _resolve_levels(key, field_plot, plot_cfg)
         fig, ax = plt.subplots(1, 1, figsize=(4.5, 4.0))
-        _field_panel(ax, x, y, field_plot, label, cmap, xlabel, ylabel, vmin=vmin, vmax=vmax, aspect="equal")
+        _field_panel(
+            ax,
+            x,
+            y,
+            field_plot,
+            label,
+            cmap,
+            xlabel,
+            ylabel,
+            vmin=vmin,
+            vmax=vmax,
+            aspect="equal",
+            plot_cfg=plot_cfg,
+        )
+        _annotate_field_stats_mpl(ax, field_plot, plot_cfg)
         _draw_hole(ax, hole_center, hole_radius)
         plt.tight_layout()
         path = os.path.join(save_dir, f"undeformed_zoom_{key}.png")
@@ -1089,11 +1270,12 @@ def plot_hole_zoom(results: dict, save_dir: str = "results",
             vmin=vmin, vmax=vmax,
             hole_line=(hx, hy),
             plot_cfg=plot_cfg,
+            colorbar_title=label,
         )
 
-    print(f"  Zoom plots  → {save_dir}/")
+    print(f"  Zoom plots  -> {save_dir}/")
     if _interactive_available():
-        print(f"  Interactive zoom plots → {interactive_dir}/")
+        print(f"  Interactive zoom plots -> {interactive_dir}/")
 
 
 def plot_loss_history(history: dict, save_dir: str = "results",
@@ -1107,7 +1289,6 @@ def plot_loss_history(history: dict, save_dir: str = "results",
     ax1.semilogy(epochs, history["total"], "k-", lw=1.5)
     ax1.set_xlabel("Epoch")
     ax1.set_ylabel("Loss")
-    ax1.set_title("Total Loss")
     ax1.grid(True, which="both", alpha=0.3)
 
     component_colors = {
@@ -1123,7 +1304,6 @@ def plot_loss_history(history: dict, save_dir: str = "results",
             ax2.semilogy(epochs, history[comp], color=col, lw=1.2, label=comp)
     ax2.set_xlabel("Epoch")
     ax2.set_ylabel("Loss")
-    ax2.set_title("Loss Components")
     ax2.legend(loc="right", fontsize=8)
     ax2.grid(True, which="both", alpha=0.3)
 
@@ -1131,14 +1311,14 @@ def plot_loss_history(history: dict, save_dir: str = "results",
     path = os.path.join(save_dir, "loss_history.png")
     plt.savefig(path, dpi=150)
     plt.close(fig)
-    print(f"  Loss curve  → {path}")
+    print(f"  Loss curve  -> {path}")
 
     if _interactive_available():
         epochs_list = epochs.tolist()
         interactive_dir = _interactive_dir(save_dir)
         html_path = os.path.join(interactive_dir, "loss_history.html")
 
-        fig_html = make_subplots(rows=1, cols=2, subplot_titles=("Total Loss", "Loss Components"))
+        fig_html = make_subplots(rows=1, cols=2, subplot_titles=("", ""))
         fig_html.add_trace(
             go.Scatter(x=epochs_list, y=history["total"], mode="lines", name="total", line=dict(color="black")),
             row=1, col=1,
@@ -1167,7 +1347,7 @@ def plot_loss_history(history: dict, save_dir: str = "results",
             include_plotlyjs="cdn",
             config={"responsive": cfg.interactive_responsive},
         )
-        print(f"  Interactive loss curve → {html_path}")
+        print(f"  Interactive loss curve -> {html_path}")
 
 
 def plot_sampling_points(batch: tuple, cfg_p, save_dir: str = "results",
@@ -1233,7 +1413,6 @@ def plot_sampling_points(batch: tuple, cfg_p, save_dir: str = "results",
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(f"x ({length_unit})", fontsize=8)
     ax.set_ylabel(f"y ({length_unit})", fontsize=8)
-    ax.set_title("Collocation / boundary-condition sampling points", fontsize=9)
     ax.tick_params(labelsize=7)
     ax.legend(loc="right", fontsize=6.5, markerscale=3, framealpha=0.85)
     ax.grid(True, alpha=0.25)
@@ -1242,7 +1421,7 @@ def plot_sampling_points(batch: tuple, cfg_p, save_dir: str = "results",
     path = os.path.join(save_dir, "sampling_points.png")
     plt.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Sampling plot → {path}")
+    print(f"  Sampling plot -> {path}")
 
     if _interactive_available():
         interactive_dir = _interactive_dir(save_dir)
@@ -1277,7 +1456,6 @@ def plot_sampling_points(batch: tuple, cfg_p, save_dir: str = "results",
 
         cfg = _resolve_plot_cfg(plot_cfg)
         fig_html.update_layout(
-            title="Collocation / boundary-condition sampling points",
             xaxis_title=f"x ({length_unit})",
             yaxis_title=f"y ({length_unit})",
             template="plotly_white",
@@ -1290,4 +1468,4 @@ def plot_sampling_points(batch: tuple, cfg_p, save_dir: str = "results",
             include_plotlyjs="cdn",
             config={"responsive": cfg.interactive_responsive},
         )
-        print(f"  Interactive sampling plot → {html_path}")
+        print(f"  Interactive sampling plot -> {html_path}")

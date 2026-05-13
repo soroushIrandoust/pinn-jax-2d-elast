@@ -10,7 +10,7 @@ class ProblemConfig:
 
     L: float = 10.0e3          # Domain length in x (mm)
     H: float = 1.0e3           # Domain height in y (mm)
-    E: float = 1.0e3           # Young's modulus (MPa) — 1 GPa = 1,000 MPa
+    E: float = 1.0e3           # Young's modulus (MPa)
     nu: float = 0.3            # Poisson's ratio (dimensionless)
     sigma0: float = 1.0        # Applied normal stress at right boundary (MPa)
     hole_radius: float = 200.0 # Circular hole radius (mm)
@@ -60,11 +60,11 @@ class TrainingConfig:
     """Optimiser and sampling hyper-parameters."""
 
     # Collocation sampling
-    n_interior: int = 4096          # Interior points
+    n_interior: int = 6144          # Interior points
     n_boundary: int = 512           # Points per boundary side
-    n_hole: int = 512               # Points on hole circumference
+    n_hole: int = 1536              # Points on hole circumference
     n_midline: int = 512            # Points on y = H/2 symmetry line
-    near_hole_fraction: float = 0.30    # Fraction of interior points in near-hole annulus
+    near_hole_fraction: float = 0.50    # Fraction of interior points in near-hole annulus
     near_hole_outer_mult: float = 3.0   # Annulus outer radius in units of hole radius
 
     # Optimisation
@@ -72,15 +72,30 @@ class TrainingConfig:
     lr_init: float = 1e-3           # Peak learning rate
     lr_final: float = 1e-5          # Final learning rate
     warmup_steps: int = 1000        # Linear warm-up steps
+    lr_decay_steps: int = 460000    # Reach lr_final by this step
     seed: int = 42
     resample_every: int = 2000      # Periodic refresh to avoid fixed-batch collapse
+
+    # Adaptive loss weighting (stabilised inverse-EMA balancing)
+    use_adaptive_weights: bool = True
+    adaptive_ema_decay: float = 0.99
+    adaptive_alpha: float = 0.5      # 0=no adapt, 1=full inverse-EMA adapt
+    adaptive_min_mult: float = 0.25  # Lower bound for per-term multiplier
+    adaptive_max_mult: float = 4.0   # Upper bound for per-term multiplier
+    adaptive_eps: float = 1e-8
+
+    # Early stopping (based on base-weighted loss, not adaptive objective)
+    early_stop_enable: bool = True
+    early_stop_min_epochs: int = 120000
+    early_stop_patience: int = 80000
+    early_stop_rel_tol: float = 1e-3
 
     # Loss weights (balanced for hole-stress concentration stability)
     w_pde: float = 10.0
     w_bc_disp: float = 100.0        # Left-boundary u = 0
     w_bc_traction: float = 60.0     # Right-boundary traction BC
     w_bc_tb: float = 50.0           # Top / bottom traction-free BCs
-    w_bc_hole: float = 3.0          # Hole traction-free BC
+    w_bc_hole: float = 12.0         # Hole traction-free BC
     w_bc_mid: float = 30.0          # Midline symmetry v(x, H/2) = 0
 
     # Logging
@@ -92,12 +107,15 @@ class TrainingConfig:
 class PlotConfig:
     """Post-processing and visualisation parameters."""
 
-    deformation_scale: float = 500.0   # Deformed-configuration magnification
+    deformation_scale: float = 250.0   # Deformed-configuration magnification
     interactive_width: int = 1800      # HTML figure width in px (initial)
     interactive_field_height: int = 620
     interactive_vector_height: int = 760
     interactive_misc_height: int = 560
     interactive_responsive: bool = True
+    png_contour_levels: int = 32      # More levels -> smoother PNG gradients
+    annotate_field_minmax: bool = True # Add min/max text to field figures
+    field_stats_digits: int = 4
     show_deformed_reference_bc: bool = False
     auto_levels: bool = False          # If True, all fields use local min/max
 
@@ -136,13 +154,13 @@ class PlotConfig:
             "u": (0.0, None),
             "v": (None, None),
             "umag": (None, None),
-            "sxx": (0.0, 3.0),
+            "sxx": (0.0, 3.5),
             "syy": (-1.0, 1.0),
             "sxy": (-1.0, 1.0),
             "exx": (None, None),
             "eyy": (None, None),
             "exy": (None, None),
-            "s1": (0.0, 3.0),
+            "s1": (0.0, 3.5),
             "s2": (-1.0, 1.0),
             "e1": (None, None),
             "e2": (None, None),

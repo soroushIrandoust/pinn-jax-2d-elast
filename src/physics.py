@@ -178,10 +178,16 @@ def bc_traction_free(params, model, pts, C11, C12, C33, use_hard_bc):
 # ---------------------------------------------------------------------------
 
 def total_loss(params, model, batch, cfg_p: ProblemConfig, cfg_t: TrainingConfig,
-               use_hard_bc: bool):
+               use_hard_bc: bool, adaptive_weights: dict = None):
     """Return (scalar_loss, info_dict).
 
     batch = (pts_int, pts_left, pts_right, pts_bot, pts_top, pts_hole, pts_mid)
+    
+    Parameters
+    ----------
+    adaptive_weights : dict, optional
+        If provided, overrides base weights with adaptive scaling. Expected keys:
+        'pde', 'bc_left', 'bc_right', 'bc_tb', 'bc_hole', 'bc_mid'
     """
     pts_int, pts_left, pts_right, pts_bot, pts_top, pts_hole, pts_mid = batch
     C11, C12, C33 = _stiffness(cfg_p.nu, cfg_p.mode)
@@ -210,13 +216,29 @@ def total_loss(params, model, batch, cfg_p: ProblemConfig, cfg_t: TrainingConfig
     # Midline symmetry
     loss_mid = bc_midline_v(params, model, pts_mid, use_hard_bc)
 
+    # Use adaptive weights if provided, else fall back to config weights
+    if adaptive_weights is not None:
+        w_pde = adaptive_weights['pde']
+        w_left = adaptive_weights['bc_left']
+        w_right = adaptive_weights['bc_right']
+        w_tb = adaptive_weights['bc_tb']
+        w_hole = adaptive_weights['bc_hole']
+        w_mid = adaptive_weights['bc_mid']
+    else:
+        w_pde = cfg_t.w_pde
+        w_left = cfg_t.w_bc_disp
+        w_right = cfg_t.w_bc_traction
+        w_tb = cfg_t.w_bc_tb
+        w_hole = cfg_t.w_bc_hole
+        w_mid = cfg_t.w_bc_mid
+
     total = (
-        cfg_t.w_pde          * loss_pde
-        + cfg_t.w_bc_disp    * loss_left
-        + cfg_t.w_bc_traction * loss_right
-        + cfg_t.w_bc_tb      * loss_tb
-        + cfg_t.w_bc_hole    * loss_hole
-        + cfg_t.w_bc_mid     * loss_mid
+        w_pde    * loss_pde
+        + w_left  * loss_left
+        + w_right * loss_right
+        + w_tb    * loss_tb
+        + w_hole  * loss_hole
+        + w_mid   * loss_mid
     )
 
     info = {

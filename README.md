@@ -4,13 +4,107 @@ Physics-informed neural network (PINN) for 2-D linear elasticity in a rectangula
 
 ## Current Default Setup
 
-- Domain: `L=10000 mm`, `H=1000 mm`
-- Hole: centered at `(L/2, H/2)` with radius `200 mm`
-- Material: plane stress, `E=1000 MPa`, `nu=0.3`
-- Load: right-edge traction `sigma0=1 MPa`
-- Network: Fourier + hole-centered polar feature MLP (`[128,128,128,128]`, `tanh`, `n_fourier=8`, `n_polar=6`)
-- Hard BC ansatz: enforces `u=v=0` on the left edge when enabled
-- Training: Adam-only, `460000` epochs, warmup-cosine schedule
+<!-- AUTO-CONFIG-START -->
+_This section is auto-generated from `src/config.py` by `python sync_readme_config.py`._
+
+### ProblemConfig
+
+| Key | Value |
+|---|---|
+| `L` | `10000.0` |
+| `H` | `1000.0` |
+| `E` | `1000.0` |
+| `nu` | `0.3` |
+| `sigma0` | `1.0` |
+| `hole_radius` | `200.0` |
+| `mode` | `plane_stress` |
+| `length_unit` | `mm` |
+| `stress_unit` | `MPa` |
+
+### ProblemConfig Derived Values
+
+| Key | Value |
+|---|---|
+| `u_ref` | `10.0` |
+| `eta_max` | `0.1` |
+| `hole_xi_c` | `0.5` |
+| `hole_eta_c` | `0.05` |
+| `hole_rc` | `0.02` |
+
+### NetworkConfig
+
+| Key | Value |
+|---|---|
+| `hidden_dims` | `(128, 128, 128, 128)` |
+| `activation` | `tanh` |
+| `use_hard_bc` | `True` |
+| `n_fourier` | `8` |
+| `n_polar` | `6` |
+
+### TrainingConfig
+
+| Key | Value |
+|---|---|
+| `n_interior` | `6144` |
+| `n_boundary` | `512` |
+| `n_hole` | `1536` |
+| `n_midline` | `512` |
+| `near_hole_fraction` | `0.5` |
+| `near_hole_outer_mult` | `3.0` |
+| `epochs_adam` | `460000` |
+| `lr_init` | `0.001` |
+| `lr_final` | `1e-05` |
+| `warmup_steps` | `1000` |
+| `lr_decay_steps` | `460000` |
+| `seed` | `42` |
+| `resample_every` | `2000` |
+| `use_adaptive_weights` | `True` |
+| `adaptive_ema_decay` | `0.99` |
+| `adaptive_alpha` | `0.5` |
+| `adaptive_min_mult` | `0.25` |
+| `adaptive_max_mult` | `4.0` |
+| `adaptive_eps` | `1e-08` |
+| `early_stop_enable` | `True` |
+| `early_stop_min_epochs` | `120000` |
+| `early_stop_patience` | `80000` |
+| `early_stop_rel_tol` | `0.001` |
+| `w_pde` | `10.0` |
+| `w_bc_disp` | `100.0` |
+| `w_bc_traction` | `60.0` |
+| `w_bc_tb` | `50.0` |
+| `w_bc_hole` | `12.0` |
+| `w_bc_mid` | `30.0` |
+| `log_every` | `500` |
+| `save_dir` | `results` |
+
+### PlotConfig
+
+| Key | Value |
+|---|---|
+| `deformation_scale` | `250.0` |
+| `interactive_width` | `1800` |
+| `interactive_field_height` | `620` |
+| `interactive_vector_height` | `760` |
+| `interactive_misc_height` | `560` |
+| `interactive_responsive` | `True` |
+| `png_contour_levels` | `32` |
+| `annotate_field_minmax` | `True` |
+| `field_stats_digits` | `4` |
+| `show_deformed_reference_bc` | `False` |
+| `auto_levels` | `False` |
+| `field_level_mode` | `{'u': 'nonnegative_auto', 'v': 'symmetric_auto', 'umag': 'auto', 'sxx': 'fixed', 'syy': 'fixed', 'sxy': 'fixed', 'exx': 'symmetric_auto', 'eyy': 'symmetric_auto', 'exy': 'symmetric_auto', 's1': 'fixed', 's2': 'fixed', 'e1': 'auto', 'e2': 'auto'}` |
+| `cmap_stress` | `RdYlGn_r` |
+| `cmap_strain` | `parula` |
+| `cmap_displacement` | `RdBu` |
+| `field_level_limits` | `{'u': (0.0, None), 'v': (None, None), 'umag': (None, None), 'sxx': (0.0, 3.5), 'syy': (-1.0, 1.0), 'sxy': (-1.0, 1.0), 'exx': (None, None), 'eyy': (None, None), 'exy': (None, None), 's1': (0.0, 3.5), 's2': (-1.0, 1.0), 'e1': (None, None), 'e2': (None, None)}` |
+
+<!-- AUTO-CONFIG-END -->
+
+To refresh this section after changing `src/config.py`, run:
+
+```bash
+python sync_readme_config.py
+```
 
 ## Features
 
@@ -44,6 +138,7 @@ All contour/vector limits and colormaps are applied consistently to both PNG and
 - `src/train.py`: training loop and checkpoint/history saving
 - `src/evaluate.py`: grid evaluation and derived fields
 - `src/network.py`: model architectures
+	- `build_model(cfg.network, cfg.problem)` derives the network's geometric inputs from the problem config
 - `src/physics.py`: PDE and BC residual/loss terms
 - `src/sampler.py`: collocation/boundary sampling
 - `src/visualize.py`: static and interactive plotting
@@ -116,4 +211,5 @@ Current naming convention mirrors PNG stems, e.g.:
 ## Notes
 
 - If a training run is already in progress, you can apply code changes and then regenerate updated figures by running `postprocess.py` after training finishes.
+- `main.py` and `postprocess.py` both call the same evaluation-and-plotting function, so the output-generation path stays consistent.
 - Interactive outputs require `plotly` (included in `requirements.txt`).

@@ -46,6 +46,7 @@ Thumbs.db
 #results/
 #results_*/
 archive/
+results_test/
 !results/
 !results/**
 

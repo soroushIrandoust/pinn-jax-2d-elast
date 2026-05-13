@@ -1,4 +1,4 @@
-"""Standalone post-processing script — runs evaluation and plotting from saved params.
+﻿"""Standalone post-processing script — runs evaluation and plotting from saved params.
 
 Use this to re-generate the full-field and near-hole plots without re-training.
 Requires that training has already been run at least once so that either
@@ -40,6 +40,103 @@ from visualize import (
 )
 
 
+def run_evaluation_and_plots(params, model, history, cfg) -> dict:
+    """Evaluate on grids and save all result plots.
+
+    This is the single shared postprocessing entry-point called by both
+    ``main.py`` (after training) and ``postprocess()`` (from a saved
+    checkpoint).
+
+    Parameters
+    ----------
+    params  : Flax parameter tree.
+    model   : Flax module (already built).
+    history : dict of loss arrays, or ``None`` when no history is available
+              in memory (the loss plot will then try loading from disk).
+    cfg     : :class:`Config` instance.
+
+    Returns
+    -------
+    metrics : dict with summary scalar metrics.
+    """
+    import numpy as np
+
+    results_dir = cfg.training.save_dir
+
+    # ------------------------------------------------------------------
+    # Evaluate
+    # ------------------------------------------------------------------
+    print("Evaluating on default full and near-hole grids ...")
+    results = evaluate_on_grid(params, model, cfg.problem, cfg.network)
+    results_zoom = evaluate_near_hole(params, model, cfg.problem, cfg.network)
+    metrics = compute_summary_metrics(results)
+
+    print(f"  max |u|      :  {metrics['u_max']:.4e} {cfg.problem.length_unit}")
+    print(f"  max |v|      :  {metrics['v_max']:.4e} {cfg.problem.length_unit}")
+    print(f"  max sxx      :  {metrics['sxx_max']:.4e} {cfg.problem.stress_unit}")
+    print(f"  min syy      :  {metrics['syy_min']:.4e} {cfg.problem.stress_unit}")
+    print(f"  max |sxy|    :  {metrics['sxy_abs_max']:.4e} {cfg.problem.stress_unit}")
+
+    # ------------------------------------------------------------------
+    # Visualise
+    # ------------------------------------------------------------------
+    print("\nSaving plots ...")
+
+    if history is not None:
+        plot_loss_history(history, results_dir, plot_cfg=cfg.plotting)
+    else:
+        # Standalone postprocess path: try loading history from disk.
+        loss_path = os.path.join(results_dir, "loss_history.npz")
+        if os.path.exists(loss_path):
+            raw = np.load(loss_path)
+            history_disk = {k: raw[k].tolist() for k in raw.files}
+            plot_loss_history(history_disk, results_dir, plot_cfg=cfg.plotting)
+        else:
+            print("  (loss_history.npz not found -- skipping loss plot)")
+
+    plot_fields(
+        results, results_dir,
+        length_unit=cfg.problem.length_unit,
+        stress_unit=cfg.problem.stress_unit,
+        plot_cfg=cfg.plotting,
+    )
+    plot_principal_fields(
+        results, results_dir,
+        length_unit=cfg.problem.length_unit,
+        stress_unit=cfg.problem.stress_unit,
+        plot_cfg=cfg.plotting,
+    )
+    plot_principal_vectors(
+        results, results_dir,
+        length_unit=cfg.problem.length_unit,
+        stress_unit=cfg.problem.stress_unit,
+        plot_cfg=cfg.plotting,
+    )
+    plot_deformed_fields(
+        results, results_dir,
+        deformation_scale=cfg.plotting.deformation_scale,
+        length_unit=cfg.problem.length_unit,
+        stress_unit=cfg.problem.stress_unit,
+        plot_cfg=cfg.plotting,
+    )
+    plot_hole_zoom(
+        results_zoom, results_dir,
+        length_unit=cfg.problem.length_unit,
+        stress_unit=cfg.problem.stress_unit,
+        plot_cfg=cfg.plotting,
+    )
+
+    batch = get_batch(cfg.problem, cfg.training, jax.random.PRNGKey(cfg.training.seed))
+    plot_sampling_points(
+        batch, cfg.problem, results_dir,
+        length_unit=cfg.problem.length_unit,
+        plot_cfg=cfg.plotting,
+    )
+
+    print(f"\n  All results saved to  '{results_dir}/'")
+    return metrics
+
+
 def postprocess(results_dir: str, checkpoint: str = "best") -> None:
     """Load saved params and regenerate all evaluation outputs.
 
@@ -56,11 +153,11 @@ def postprocess(results_dir: str, checkpoint: str = "best") -> None:
     params_path = os.path.join(results_dir, fname)
 
     if not os.path.exists(params_path):
-        # Fall back to the other checkpoint if the requested one is missing
+        # Fall back to the other checkpoint if the requested one is missing.
         alt = "final_params.pkl" if checkpoint == "best" else "best_params.pkl"
         alt_path = os.path.join(results_dir, alt)
         if os.path.exists(alt_path):
-            print(f"  ⚠  '{fname}' not found — falling back to '{alt}'")
+            print(f"  '{fname}' not found -- falling back to '{alt}'")
             params_path = alt_path
         else:
             raise FileNotFoundError(
@@ -68,7 +165,7 @@ def postprocess(results_dir: str, checkpoint: str = "best") -> None:
                 "Run main.py first to train the model."
             )
 
-    print(f"\nLoading params from  '{params_path}' …")
+    print(f"\nLoading params from  '{params_path}' ...")
     params = load_params(params_path)
 
     cfg = Config()
@@ -76,64 +173,11 @@ def postprocess(results_dir: str, checkpoint: str = "best") -> None:
 
     model = build_model(
         cfg.network,
-        eta_max=cfg.problem.eta_max,
-        hole_xi_c=cfg.problem.hole_xi_c,
-        hole_eta_c=cfg.problem.hole_eta_c,
-        hole_rc=cfg.problem.hole_rc,
+        cfg.problem,
     )
 
-    # ------------------------------------------------------------------
-    # Evaluate
-    # ------------------------------------------------------------------
-    print("Evaluating on default full and near-hole grids …")
-    results = evaluate_on_grid(params, model, cfg.problem, cfg.network)
-    results_zoom = evaluate_near_hole(params, model, cfg.problem, cfg.network)
-    metrics = compute_summary_metrics(results)
-    print(f"  max sigma_xx = {metrics['sxx_max']:.4e} {cfg.problem.stress_unit}")
-    print(f"  max |σ_xy| = {metrics['sxy_abs_max']:.4e} {cfg.problem.stress_unit}")
-
-    # ------------------------------------------------------------------
-    # Visualise
-    # ------------------------------------------------------------------
-    print("\nSaving plots …")
-
-    loss_path = os.path.join(results_dir, "loss_history.npz")
-    if os.path.exists(loss_path):
-        import numpy as np
-        raw = np.load(loss_path)
-        history = {k: raw[k].tolist() for k in raw.files}
-        plot_loss_history(history, results_dir, plot_cfg=cfg.plotting)
-    else:
-        print("  (loss_history.npz not found — skipping loss plot)")
-
-    plot_fields(results, results_dir,
-                length_unit=cfg.problem.length_unit,
-                                stress_unit=cfg.problem.stress_unit,
-                                plot_cfg=cfg.plotting)
-    plot_principal_fields(results, results_dir,
-                          length_unit=cfg.problem.length_unit,
-                                                    stress_unit=cfg.problem.stress_unit,
-                                                    plot_cfg=cfg.plotting)
-    plot_principal_vectors(results, results_dir,
-                           length_unit=cfg.problem.length_unit,
-                                                     stress_unit=cfg.problem.stress_unit,
-                                                     plot_cfg=cfg.plotting)
-    plot_deformed_fields(results, results_dir,
-                         deformation_scale=cfg.plotting.deformation_scale,
-                         length_unit=cfg.problem.length_unit,
-                                                 stress_unit=cfg.problem.stress_unit,
-                                                 plot_cfg=cfg.plotting)
-    plot_hole_zoom(results_zoom, results_dir,
-                   length_unit=cfg.problem.length_unit,
-                                     stress_unit=cfg.problem.stress_unit,
-                                     plot_cfg=cfg.plotting)
-
-    batch = get_batch(cfg.problem, cfg.training, jax.random.PRNGKey(cfg.training.seed))
-    plot_sampling_points(batch, cfg.problem, results_dir,
-                         length_unit=cfg.problem.length_unit,
-                         plot_cfg=cfg.plotting)
-
-    print(f"\n✓  All results saved to  '{results_dir}/'")
+    # history=None signals run_evaluation_and_plots to load history from disk.
+    run_evaluation_and_plots(params, model, None, cfg)
 
 
 def main():

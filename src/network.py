@@ -17,7 +17,8 @@ FourierMLP  (default when NetworkConfig.n_fourier > 0)
         xi_n  = xi                    (already in [0, 1])
         eta_n = eta / eta_max         (eta_max = H/L)
 
-    Then the feature vector is formed:
+    Then the feature vector is formed from the raw coordinates plus Fourier
+    bands:
         phi = [xi_n, eta_n,
                sin(pi*xi_n),   cos(pi*xi_n),   sin(pi*eta_n),   cos(pi*eta_n),
                sin(2pi*xi_n),  cos(2pi*xi_n),  sin(2pi*eta_n),  cos(2pi*eta_n),
@@ -34,7 +35,7 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
-from config import NetworkConfig
+from config import NetworkConfig, ProblemConfig
 
 _ACTIVATIONS: dict = {
     "tanh":  nn.tanh,
@@ -51,7 +52,7 @@ class MLP(nn.Module):
 
     @nn.compact
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
-        """x : (batch, 2)."""
+        """x is a batch of normalised coordinates with columns [xi, eta]."""
         act = _ACTIVATIONS[self.activation]
         for dim in self.hidden_dims:
             x = nn.Dense(dim, kernel_init=nn.initializers.glorot_normal())(x)
@@ -77,13 +78,13 @@ class FourierMLP(nn.Module):
     """
 
     hidden_dims: Sequence[int]
+    n_fourier: int
+    eta_max: float       # H / L; used to rescale eta into [0, 1]
+    n_polar: int         # angular harmonics for hole-centred embedding
+    hole_xi_c: float     # normalised hole centre x
+    hole_eta_c: float    # normalised hole centre y
+    hole_rc: float       # normalised hole radius
     activation: str = "tanh"
-    n_fourier: int = 8
-    eta_max: float = 0.1    # H/L; used to rescale eta ∈ [0, eta_max] → [0, 1]
-    n_polar: int = 6        # angular harmonics for hole-centred embedding (0 = off)
-    hole_xi_c: float = 0.5  # normalised hole centre x
-    hole_eta_c: float = 0.05 # normalised hole centre y
-    hole_rc: float = 0.01   # normalised hole radius
 
     @nn.compact
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
@@ -140,10 +141,7 @@ class FourierMLP(nn.Module):
 
 def build_model(
     cfg: NetworkConfig,
-    eta_max: float,
-    hole_xi_c: float = 0.5,
-    hole_eta_c: float = 0.05,
-    hole_rc: float = 0.01,
+    problem: ProblemConfig,
 ) -> nn.Module:
     """Construct the network from config.
 
@@ -161,11 +159,11 @@ def build_model(
             hidden_dims=cfg.hidden_dims,
             activation=cfg.activation,
             n_fourier=cfg.n_fourier,
-            eta_max=eta_max,
+            eta_max=problem.eta_max,
             n_polar=cfg.n_polar,
-            hole_xi_c=hole_xi_c,
-            hole_eta_c=hole_eta_c,
-            hole_rc=hole_rc,
+            hole_xi_c=problem.hole_xi_c,
+            hole_eta_c=problem.hole_eta_c,
+            hole_rc=problem.hole_rc,
         )
     return MLP(hidden_dims=cfg.hidden_dims, activation=cfg.activation)
 

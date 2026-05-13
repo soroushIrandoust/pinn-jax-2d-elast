@@ -1,0 +1,4 @@
+Interactive plots were skipped because Plotly is not available.
+Install dependencies and rerun postprocess:
+    pip install -r requirements.txt
+    python postprocess.py
