@@ -29,6 +29,7 @@ import jax
 from config import Config
 from train import train
 from postprocess import run_evaluation_and_plots
+from generate_report import build_report
 
 
 class _TeeStream:
@@ -91,6 +92,15 @@ def main():
         # -------------------------------------------------------------------
         print("\nPost-processing ...")
         run_evaluation_and_plots(params, model, history, cfg)
+
+        # -------------------------------------------------------------------
+        # Technical report
+        # -------------------------------------------------------------------
+        print("\nGenerating technical report ...")
+        try:
+            build_report(save_dir)
+        except Exception as exc:
+            print(f"Warning: report generation failed: {exc}")
 
     finally:
         sys.stdout = orig_stdout
