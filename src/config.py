@@ -109,10 +109,14 @@ class PlotConfig:
 
     deformation_scale: float = 250.0   # Deformed-configuration magnification
     interactive_width: int = 1800      # HTML figure width in px (initial)
-    interactive_field_height: int = 620
-    interactive_vector_height: int = 760
-    interactive_misc_height: int = 560
+    interactive_field_height: int = 900
+    interactive_vector_height: int = 900
+    interactive_misc_height: int = 900
     interactive_responsive: bool = True
+    interactive_lock_aspect: bool = True  # True: preserve x/y physical scale in HTML
+    # Colorbar length in interactive plots. Set to None to auto-fit by aspect.
+    interactive_colorbar_len_fraction: float | None = 0.995
+    hole_zoom_radius_factor: float = 3.0  # Zoom window half-size = factor * hole_radius
     png_contour_levels: int = 32      # More levels -> smoother PNG gradients
     annotate_field_minmax: bool = True # Add min/max text to field figures
     field_stats_digits: int = 4

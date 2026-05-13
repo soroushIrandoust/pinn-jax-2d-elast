@@ -244,7 +244,9 @@ def _save_interactive_field(x, y, z, title: str, cmap: str,
                             irregular_coords: bool = False,
                             ref_bc_overlay: dict | None = None,
                             colorbar_title: str | None = None,
-                            extra_annotation_lines: str | None = None):
+                            extra_annotation_lines: str | None = None,
+                            xlim: tuple[float, float] | None = None,
+                            ylim: tuple[float, float] | None = None):
     if not _interactive_available():
         return
 
@@ -256,7 +258,10 @@ def _save_interactive_field(x, y, z, title: str, cmap: str,
     x_arr = np.asarray(x)
     y_arr = np.asarray(y)
     z_ma = np.ma.array(z)
-    cb_len = _plotly_colorbar_len(x_arr, y_arr, cfg.interactive_width, cfg.interactive_field_height)
+    if cfg.interactive_colorbar_len_fraction is None:
+        cb_len = _plotly_colorbar_len(x_arr, y_arr, cfg.interactive_width, cfg.interactive_field_height)
+    else:
+        cb_len = float(np.clip(cfg.interactive_colorbar_len_fraction, 0.18, 0.995))
 
     if irregular_coords:
         x_flat = x_arr.ravel()
@@ -286,7 +291,7 @@ def _save_interactive_field(x, y, z, title: str, cmap: str,
                     colorbar=dict(
                         title=dict(text=cbar_title, side="top"),
                         lenmode="fraction",
-                        len=min(0.995, cb_len * 1.28),
+                        len=cb_len,
                         y=0.5,
                         yanchor="middle",
                     ),
@@ -318,7 +323,7 @@ def _save_interactive_field(x, y, z, title: str, cmap: str,
                 colorbar=dict(
                     title=dict(text=cbar_title, side="top"),
                     lenmode="fraction",
-                    len=min(0.995, cb_len * 1.28),
+                    len=cb_len,
                     y=0.5,
                     yanchor="middle",
                 ),
@@ -379,24 +384,43 @@ def _save_interactive_field(x, y, z, title: str, cmap: str,
             )
 
     x_range, y_range = _plotly_xy_ranges(x_arr, y_arr)
+    if xlim is not None:
+        x_range = [float(xlim[0]), float(xlim[1])]
+    if ylim is not None:
+        y_range = [float(ylim[0]), float(ylim[1])]
 
     fig.update_layout(
         xaxis_title=xlabel,
         yaxis_title=ylabel,
-        xaxis=dict(range=x_range),
-        yaxis=dict(range=y_range),
+        xaxis=dict(
+            range=x_range,
+            showgrid=False,
+            showline=False,
+            showticklabels=False,
+            ticks="",
+        ),
+        yaxis=dict(
+            range=y_range,
+            showgrid=False,
+            showline=False,
+            showticklabels=False,
+            ticks="",
+        ),
         template="plotly_white",
         width=cfg.interactive_width,
         height=cfg.interactive_field_height,
+        dragmode="pan",
     )
     if cfg.annotate_field_minmax:
+        # Position annotation under colorbar (on the right side)
+        # Colorbar is at x ≈ 0.98-1.0, so annotation goes at x ≈ 0.98, lower y
         fig.add_annotation(
-            x=0.985,
-            y=0.01,
+            x=0.98,
+            y=0.15,
             xref="paper",
             yref="paper",
             xanchor="right",
-            yanchor="bottom",
+            yanchor="top",
             align="right",
             text=(
                 _field_stats_text(z, digits=int(cfg.field_stats_digits))
@@ -407,11 +431,19 @@ def _save_interactive_field(x, y, z, title: str, cmap: str,
             borderwidth=0,
             font=dict(size=12),
         )
-    fig.update_yaxes(scaleanchor="x", scaleratio=1, constrain="domain")
+    if cfg.interactive_lock_aspect:
+        # Keep 1:1 physical scaling while using axis-range expansion
+        # instead of shrinking the drawing domain (which creates white bands).
+        fig.update_yaxes(scaleanchor="x", scaleratio=1, constrain="range")
     fig.write_html(
         html_path,
         include_plotlyjs="cdn",
-        config={"responsive": cfg.interactive_responsive},
+        config={
+            "responsive": cfg.interactive_responsive,
+            "scrollZoom": True,
+            "modeBarButtonsToAdd": ["pan2d"],
+            "displayModeBar": True,
+        },
     )
 
 
@@ -564,7 +596,10 @@ def _save_vector_plot_html(x, y, vx, vy, mag, title, out_path,
     cmax = float(np.nanmax(m_f)) if vmax is None else float(vmax)
     if cmax <= cmin:
         cmax = cmin + 1e-12
-    cb_len = _plotly_colorbar_len(x_f, y_f, cfg.interactive_width, cfg.interactive_vector_height)
+    if cfg.interactive_colorbar_len_fraction is None:
+        cb_len = _plotly_colorbar_len(x_f, y_f, cfg.interactive_width, cfg.interactive_vector_height)
+    else:
+        cb_len = float(np.clip(cfg.interactive_colorbar_len_fraction, 0.18, 0.995))
 
     t = np.clip((m_f - cmin) / (cmax - cmin), 0.0, 1.0)
     cmap_obj = _get_cmap(cmap)
@@ -605,7 +640,7 @@ def _save_vector_plot_html(x, y, vx, vy, mag, title, out_path,
                 colorbar=dict(
                     title=dict(text=cbar_title, side="top"),
                     lenmode="fraction",
-                    len=min(0.995, cb_len * 1.28),
+                    len=cb_len,
                     y=0.5,
                     yanchor="middle",
                 ),
@@ -661,11 +696,24 @@ def _save_vector_plot_html(x, y, vx, vy, mag, title, out_path,
     fig.update_layout(
         xaxis_title=xlabel,
         yaxis_title=ylabel,
-        xaxis=dict(range=x_range),
-        yaxis=dict(range=y_range),
+        xaxis=dict(
+            range=x_range,
+            showgrid=False,
+            showline=False,
+            showticklabels=False,
+            ticks="",
+        ),
+        yaxis=dict(
+            range=y_range,
+            showgrid=False,
+            showline=False,
+            showticklabels=False,
+            ticks="",
+        ),
         template="plotly_white",
         width=cfg.interactive_width,
         height=cfg.interactive_vector_height,
+        dragmode="pan",
     )
     if cfg.annotate_field_minmax:
         fig.add_annotation(
@@ -682,11 +730,16 @@ def _save_vector_plot_html(x, y, vx, vy, mag, title, out_path,
             borderwidth=0,
             font=dict(size=12),
         )
-    fig.update_yaxes(scaleanchor="x", scaleratio=1, constrain="domain")
+    if cfg.interactive_lock_aspect:
+        fig.update_yaxes(scaleanchor="x", scaleratio=1, constrain="range")
     fig.write_html(
         out_path,
         include_plotlyjs="cdn",
-        config={"responsive": cfg.interactive_responsive},
+        config={
+            "responsive": cfg.interactive_responsive,
+            "modeBarButtonsToAdd": ["pan2d"],
+            "displayModeBar": True,
+        },
     )
 
 def _field_panel(ax, x, y, z, title: str, cmap: str = "RdBu_r",
@@ -867,12 +920,12 @@ def plot_fields(results: dict, save_dir: str = "results",
     _cd = _cfg.cmap_displacement
     _ce = _cfg.cmap_strain
     field_specs = [
-        ("u", "u", _cd),
-        ("v", "v", _cd),
-        ("umag", "|u|", _cd),
-        ("sxx", "σ_xx", _cs),
-        ("syy", "σ_yy", _cs),
-        ("sxy", "σ_xy", _cs),
+        ("u", f"u ({lu})", _cd),
+        ("v", f"v ({lu})", _cd),
+        ("umag", f"|u| ({lu})", _cd),
+        ("sxx", f"σ_xx ({su})", _cs),
+        ("syy", f"σ_yy ({su})", _cs),
+        ("sxy", f"σ_xy ({su})", _cs),
         ("exx", "ε_xx", _ce),
         ("eyy", "ε_yy", _ce),
         ("exy", "ε_xy", _ce),
@@ -949,8 +1002,8 @@ def plot_principal_fields(results: dict, save_dir: str = "results",
     _cs = _cfg.cmap_stress
     _ce = _cfg.cmap_strain
     field_specs = [
-        ("s1", "σ1", _cs),
-        ("s2", "σ2", _cs),
+        ("s1", f"σ1 ({stress_unit})", _cs),
+        ("s2", f"σ2 ({stress_unit})", _cs),
         ("e1", "ε1", _ce),
         ("e2", "ε2", _ce),
     ]
@@ -1008,6 +1061,7 @@ def plot_principal_fields(results: dict, save_dir: str = "results",
 
 def plot_principal_vectors(results: dict, save_dir: str = "results",
                            length_unit: str = "m", stress_unit: str = "Pa",
+                           strain_unit: str = "",
                            stride: int = 16,
                            plot_cfg: PlotConfig | None = None):
     """Save principal stress/strain direction vector plots in PNG and HTML."""
@@ -1049,11 +1103,14 @@ def plot_principal_vectors(results: dict, save_dir: str = "results",
     hx = hole_center[0] + hole_radius * np.cos(np.linspace(0.0, 2.0 * np.pi, 361))
     hy = hole_center[1] + hole_radius * np.sin(np.linspace(0.0, 2.0 * np.pi, 361))
 
+    e1_title = "ε1" if not strain_unit else f"ε1 ({strain_unit})"
+    e2_title = "ε2" if not strain_unit else f"ε2 ({strain_unit})"
+
     specs = [
-        ("s1", "undeformed_vector_s1", "σ1", ds1x, ds1y, s1, _resolve_plot_cfg(plot_cfg).cmap_stress),
-        ("s2", "undeformed_vector_s2", "σ2", ds2x, ds2y, s2, _resolve_plot_cfg(plot_cfg).cmap_stress),
-        ("e1", "undeformed_vector_e1", "ε1", de1x, de1y, e1, _resolve_plot_cfg(plot_cfg).cmap_strain),
-        ("e2", "undeformed_vector_e2", "ε2", de2x, de2y, e2, _resolve_plot_cfg(plot_cfg).cmap_strain),
+        ("s1", "undeformed_vector_s1", f"σ1 ({stress_unit})", ds1x, ds1y, s1, _resolve_plot_cfg(plot_cfg).cmap_stress),
+        ("s2", "undeformed_vector_s2", f"σ2 ({stress_unit})", ds2x, ds2y, s2, _resolve_plot_cfg(plot_cfg).cmap_stress),
+        ("e1", "undeformed_vector_e1", e1_title, de1x, de1y, e1, _resolve_plot_cfg(plot_cfg).cmap_strain),
+        ("e2", "undeformed_vector_e2", e2_title, de2x, de2y, e2, _resolve_plot_cfg(plot_cfg).cmap_strain),
     ]
 
     xlabel = f"x ({length_unit})"
@@ -1113,14 +1170,14 @@ def plot_deformed_fields(results: dict, save_dir: str = "results",
 
     # spec: (field_key, field_array, output_stem, title, cmap)
     field_specs = [
-        ("u", results["u"],   "deformed_u",    "u", cfg_plot.cmap_displacement),
-        ("v", results["v"],   "deformed_v",    "v", cfg_plot.cmap_displacement),
-        ("umag", umag,            "deformed_umag", "|u|", cfg_plot.cmap_displacement),
-        ("sxx", results["sxx"], "deformed_sxx",  "σ_xx", cfg_plot.cmap_stress),
-        ("syy", results["syy"], "deformed_syy",  "σ_yy", cfg_plot.cmap_stress),
-        ("sxy", sxy_field,       "deformed_sxy",  "σ_xy", cfg_plot.cmap_stress),
-        ("s1", results.get("s1"), "deformed_s1",  "σ1", cfg_plot.cmap_stress),
-        ("s2", results.get("s2"), "deformed_s2",  "σ2", cfg_plot.cmap_stress),
+        ("u", results["u"],   "deformed_u",    f"u ({length_unit})", cfg_plot.cmap_displacement),
+        ("v", results["v"],   "deformed_v",    f"v ({length_unit})", cfg_plot.cmap_displacement),
+        ("umag", umag,            "deformed_umag", f"|u| ({length_unit})", cfg_plot.cmap_displacement),
+        ("sxx", results["sxx"], "deformed_sxx",  f"σ_xx ({stress_unit})", cfg_plot.cmap_stress),
+        ("syy", results["syy"], "deformed_syy",  f"σ_yy ({stress_unit})", cfg_plot.cmap_stress),
+        ("sxy", sxy_field,       "deformed_sxy",  f"σ_xy ({stress_unit})", cfg_plot.cmap_stress),
+        ("s1", results.get("s1"), "deformed_s1",  f"σ1 ({stress_unit})", cfg_plot.cmap_stress),
+        ("s2", results.get("s2"), "deformed_s2",  f"σ2 ({stress_unit})", cfg_plot.cmap_stress),
         ("exx", results.get("exx"), "deformed_exx", "ε_xx", cfg_plot.cmap_strain),
         ("eyy", results.get("eyy"), "deformed_eyy", "ε_yy", cfg_plot.cmap_strain),
         ("exy", results.get("exy"), "deformed_exy", "ε_xy", cfg_plot.cmap_strain),
@@ -1219,11 +1276,11 @@ def plot_hole_zoom(results: dict, save_dir: str = "results",
 
     _cfg = _resolve_plot_cfg(plot_cfg)
     field_specs = [
-        ("sxx", "σ_xx", _cfg.cmap_stress),
-        ("syy", "σ_yy", _cfg.cmap_stress),
-        ("sxy", "σ_xy", _cfg.cmap_stress),
-        ("s1", "σ1", _cfg.cmap_stress),
-        ("s2", "σ2", _cfg.cmap_stress),
+        ("sxx", f"σ_xx ({stress_unit})", _cfg.cmap_stress),
+        ("syy", f"σ_yy ({stress_unit})", _cfg.cmap_stress),
+        ("sxy", f"σ_xy ({stress_unit})", _cfg.cmap_stress),
+        ("s1", f"σ1 ({stress_unit})", _cfg.cmap_stress),
+        ("s2", f"σ2 ({stress_unit})", _cfg.cmap_stress),
         ("exx", "ε_xx", _cfg.cmap_strain),
         ("eyy", "ε_yy", _cfg.cmap_strain),
         ("exy", "ε_xy", _cfg.cmap_strain),
@@ -1235,6 +1292,20 @@ def plot_hole_zoom(results: dict, save_dir: str = "results",
     interactive_dir = _interactive_dir(save_dir)
     hx = hole_center[0] + hole_radius * np.cos(np.linspace(0.0, 2.0 * np.pi, 361))
     hy = hole_center[1] + hole_radius * np.sin(np.linspace(0.0, 2.0 * np.pi, 361))
+
+    x_min = float(np.nanmin(np.asarray(x)))
+    x_max = float(np.nanmax(np.asarray(x)))
+    y_min = float(np.nanmin(np.asarray(y)))
+    y_max = float(np.nanmax(np.asarray(y)))
+    zoom_half = float(_cfg.hole_zoom_radius_factor) * float(hole_radius)
+    xlim = (
+        max(x_min, float(hole_center[0]) - zoom_half),
+        min(x_max, float(hole_center[0]) + zoom_half),
+    )
+    ylim = (
+        max(y_min, float(hole_center[1]) - zoom_half),
+        min(y_max, float(hole_center[1]) + zoom_half),
+    )
 
     for key, label, cmap in field_specs:
         if key not in results:
@@ -1251,6 +1322,8 @@ def plot_hole_zoom(results: dict, save_dir: str = "results",
             cmap,
             xlabel,
             ylabel,
+            xlim=xlim,
+            ylim=ylim,
             vmin=vmin,
             vmax=vmax,
             aspect="equal",
@@ -1271,6 +1344,8 @@ def plot_hole_zoom(results: dict, save_dir: str = "results",
             hole_line=(hx, hy),
             plot_cfg=plot_cfg,
             colorbar_title=label,
+            xlim=xlim,
+            ylim=ylim,
         )
 
     print(f"  Zoom plots  -> {save_dir}/")
@@ -1341,11 +1416,18 @@ def plot_loss_history(history: dict, save_dir: str = "results",
             template="plotly_white",
             width=cfg.interactive_width,
             height=cfg.interactive_misc_height,
+            dragmode="pan",
         )
+        fig_html.update_xaxes(showgrid=False, showline=False, showticklabels=False, ticks="")
+        fig_html.update_yaxes(showgrid=False, showline=False, showticklabels=False, ticks="")
         fig_html.write_html(
             html_path,
             include_plotlyjs="cdn",
-            config={"responsive": cfg.interactive_responsive},
+            config={
+                "responsive": cfg.interactive_responsive,
+                "modeBarButtonsToAdd": ["pan2d"],
+                "displayModeBar": True,
+            },
         )
         print(f"  Interactive loss curve -> {html_path}")
 
@@ -1461,11 +1543,19 @@ def plot_sampling_points(batch: tuple, cfg_p, save_dir: str = "results",
             template="plotly_white",
             width=cfg.interactive_width,
             height=cfg.interactive_misc_height,
+            dragmode="pan",
         )
-        fig_html.update_yaxes(scaleanchor="x", scaleratio=1)
+        fig_html.update_xaxes(showgrid=False, showline=False, showticklabels=False, ticks="")
+        fig_html.update_yaxes(showgrid=False, showline=False, showticklabels=False, ticks="")
+        if cfg.interactive_lock_aspect:
+            fig_html.update_yaxes(scaleanchor="x", scaleratio=1, constrain="range")
         fig_html.write_html(
             html_path,
             include_plotlyjs="cdn",
-            config={"responsive": cfg.interactive_responsive},
+            config={
+                "responsive": cfg.interactive_responsive,
+                "modeBarButtonsToAdd": ["pan2d"],
+                "displayModeBar": True,
+            },
         )
         print(f"  Interactive sampling plot -> {html_path}")
