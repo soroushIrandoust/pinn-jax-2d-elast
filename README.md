@@ -213,6 +213,6 @@ Current naming convention mirrors PNG stems, e.g.:
 
 ## Notes
 
-- If a training run is already in progress, you can apply code changes and then regenerate updated figures by running `postprocess.py` after training finishes.
-- `main.py` and `postprocess.py` both call the same evaluation-and-plotting function, so the output-generation path stays consistent.
+- Results can be regenerated post training if the solution parameters are saved in the results folder (.pkl) by running `postprocess.py`.
+- `main.py` and `postprocess.py` both call the same evaluation-and-plotting function.
 - Interactive outputs require `plotly` (included in `requirements.txt`).
